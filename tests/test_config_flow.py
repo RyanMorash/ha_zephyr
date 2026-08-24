@@ -16,17 +16,38 @@ USER_INPUT = {"username": "user@example.com", "password": "hunter2"}
 
 @pytest.fixture
 def mock_client():
-    """A ZephyrClient that authenticates and returns one hood."""
+    """A ZephyrClient that authenticates and returns one hood.
+
+    Patched under both config_flow (credential validation) and the
+    integration package itself (custom_components.zephyr_connect.ZephyrClient),
+    since a config entry created by the flow is set up immediately after
+    creation and __init__.async_setup_entry builds its own ZephyrClient. The
+    extra attributes below (async_start, state, add_listener, connected,
+    ...) mirror what tests/test_init.py mocks, so that real entry setup
+    (exercised by test_created_entry_actually_loads) never touches a socket.
+    """
     caps = MagicMock()
     caps.thing_name = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
     caps.model = "AK7400AS"
     client = MagicMock()
     client.async_setup = AsyncMock(return_value=[caps])
+    client.async_start = AsyncMock()
     client.async_stop = AsyncMock()
+    client.async_poll = AsyncMock(return_value=MagicMock())
+    client.async_refresh_if_needed = AsyncMock(return_value=False)
+    client.state = MagicMock(return_value=None)
+    client.add_listener = MagicMock(return_value=lambda: None)
+    client.connected = True
     client.identity_id = "us-west-2:00000000-1111-2222-3333-444455556666"
-    with patch(
-        "custom_components.zephyr_connect.config_flow.ZephyrClient",
-        return_value=client,
+    with (
+        patch(
+            "custom_components.zephyr_connect.config_flow.ZephyrClient",
+            return_value=client,
+        ),
+        patch(
+            "custom_components.zephyr_connect.ZephyrClient",
+            return_value=client,
+        ),
     ):
         yield client
 
