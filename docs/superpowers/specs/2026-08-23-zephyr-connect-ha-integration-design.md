@@ -309,6 +309,20 @@ Consequences for the integration:
   `update/accepted` roughly 1.2-1.6s later, typically carrying a fuller
   block. Treat only the device's report as authoritative.
 
+### 7.5 Delay timer preconditions — OPEN
+
+The vendor app only exposes the delay-timer control when power is on. It is
+not yet established whether the DEVICE enforces this or the app merely gates
+its own UI. The distinction drives entity design:
+
+- Device-enforced -> the delay-timer entity must become unavailable when
+  `power == 0`, otherwise writes vanish silently and the entity displays a
+  value the hood is not honouring.
+- App-only gating -> the entity is always available.
+
+Test: with `power=0`, write `setdelaytimer` and check whether the value
+holds, reverts, or snaps to 0.
+
 ## 8. Entity model
 
 Entities are gated on `discoverdevice` capabilities rather than hardcoded per
