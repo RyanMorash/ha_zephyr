@@ -1211,7 +1211,7 @@ def test_max_speed_reports_one_hundred_percent():
     assert ZephyrFan(_coordinator(fan=6)).is_on is True
 
 
-@pytest.mark.parametrize(("speed", "expected"), [(1, 17), (3, 50), (5, 83)])
+@pytest.mark.parametrize(("speed", "expected"), [(1, 16), (3, 50), (5, 83)])
 def test_intermediate_speeds_map_to_percentages(speed, expected):
     assert ZephyrFan(_coordinator(fan=speed)).percentage == expected
 
@@ -1442,9 +1442,11 @@ def test_off_state():
 
 def test_max_level_is_full_brightness():
     assert ZephyrLight(_coordinator(light=3)).brightness == 255
+    # HA scales by FLOOR division, so levels 1 and 2 give 84 and 168,
+    # not the 85/170 exact division would suggest.
 
 
-@pytest.mark.parametrize(("level", "expected"), [(1, 85), (2, 170), (3, 255)])
+@pytest.mark.parametrize(("level", "expected"), [(1, 84), (2, 168), (3, 255)])
 def test_levels_map_to_brightness(level, expected):
     assert ZephyrLight(_coordinator(light=level)).brightness == expected
 
