@@ -59,7 +59,7 @@ Six modules, each independently testable.
 | `const.py` | AWS and vendor constants | — |
 | `presign.py` | SigV4 presigned WebSocket URL builder | stdlib only |
 | `auth.py` | SRP -> identity exchange -> AttachPolicy; expiry tracking | `pycognito`, `boto3` |
-| `api.py` | `getowndevices`, `discoverdevice` over pinned TLS | `aiohttp` |
+| `api.py` | `getowndevices`, `discoverdevice` over supplemented TLS trust | `aiohttp` |
 | `shadow.py` | MQTT subscribe/publish, granted-QoS validation | `paho-mqtt` |
 | `client.py` | Facade: orchestration, refresh, reconnect, state cache | the above |
 
@@ -162,24 +162,45 @@ Rationale: MQTT alone leaves entities stale or unavailable when a token refresh
 or vendor hiccup breaks the socket. Polling alone adds latency and permanent
 vendor API load. The hybrid degrades rather than fails.
 
-## 6. TLS pinning
+## 6. TLS trust supplement
 
 `zephyr-prod-app.gemteks.com` presents a chain whose intermediate omits the
 Subject Key Identifier extension, failing OpenSSL 3.x verification. Apple's
 Security framework is lenient, so the iOS app is unaffected; Python is not.
 `verify=False` is not acceptable.
 
-The library ships a **CA-only** bundle — TWCA Root CA, TWCA Global Root CA, and
-TWCA Secure SSL Certification Authority — as package data. Supplying the
-intermediate as a trust anchor satisfies verification.
+The library ships the TWCA certificate set — Root CA, Global Root CA, and the
+Secure SSL Certification Authority intermediate — as package data, and loads
+them as **supplementary** trust anchors on top of the system trust store:
+
+```python
+ctx = ssl.create_default_context()        # system CAs stay loaded
+ctx.load_verify_locations(cafile=bundle)  # TWCA added alongside
+```
+
+This is deliberately **not** certificate pinning. Measured against the live
+host:
+
+| Trust configuration | Vendor host | Mainstream-CA host |
+|---|---|---|
+| System only (191 CAs) | FAIL: `CERTIFICATE_VERIFY_FAILED` | OK |
+| TWCA only (3 CAs) | OK | **FAIL** |
+| System + TWCA (193 CAs) | OK | OK |
+
+Replacing the trust store would break the integration completely the day
+Gemtek rotates to any mainstream CA — a self-inflicted outage on a device
+with no local control path. Adding to it fixes the SKI defect and survives
+rotation.
+
+Note that the system store already trusts the TWCA *roots*; the cert that
+actually resolves the failure is the intermediate, which is precisely the one
+missing the SKI extension.
+
+`verify_mode` stays `CERT_REQUIRED` and `check_hostname` stays `True`.
 
 This supersedes PROTOCOL.md §4 and §7.6, which describe pinning the leaf and
-warn of a 2026-10-15 expiry. Verified empirically: a CA-only bundle completes
-the handshake. Validity moves from **2026-10-15 to 2030**, and the pin survives
-vendor leaf rotation.
-
-`api.py` raises a distinct, actionable error on certificate failure rather than
-a generic `SSLError`, naming the bundle and its expiry.
+warn of a 2026-10-15 expiry. Verified empirically. `api.py` raises a distinct,
+actionable error on certificate failure rather than a generic `SSLError`.
 
 ## 7. Write path
 

@@ -4,7 +4,7 @@
 
 **Goal:** Build `pyzephyrconnect`, a Python library that authenticates to the Zephyr/Gemtek AWS IoT cloud, reads range hood state from the device shadow, and provides a safety-railed probe CLI for mapping the unverified write path.
 
-**Architecture:** Async facade (`client.py`) over four independently testable layers: SigV4 presigning (pure, stdlib), REST (`aiohttp` with a pinned CA bundle), auth (`pycognito`/`boto3` wrapped in `asyncio.to_thread`), and MQTT transport (`paho-mqtt` over a presigned WebSocket). No network in the test suite.
+**Architecture:** Async facade (`client.py`) over four independently testable layers: SigV4 presigning (pure, stdlib), REST (`aiohttp` with a supplemented CA bundle), auth (`pycognito`/`boto3` wrapped in `asyncio.to_thread`), and MQTT transport (`paho-mqtt` over a presigned WebSocket). No network in the test suite.
 
 **Tech Stack:** Python 3.12+, `aiohttp`, `pycognito`, `paho-mqtt` 2.x, `pytest`, `pytest-asyncio`
 
@@ -21,7 +21,7 @@ Every task's requirements implicitly include this section.
 - `awsiotsdk` and `awscrt` are FORBIDDEN. They are compiled wheels unavailable on 32-bit ARM. This is the reason the transport is hand-built.
 - The library exposes an async surface. `pycognito` and `boto3` are blocking and MUST be wrapped in `asyncio.to_thread` inside the library, never pushed onto the caller.
 - No test may make a network call. All `aiohttp`, `paho`, `pycognito`, and `boto3` interactions are mocked.
-- TLS to `zephyr-prod-app.gemteks.com` uses the bundled CA-only PEM. `verify=False` is FORBIDDEN in all code paths, including tests and the CLI.
+- TLS to `zephyr-prod-app.gemteks.com` ADDS the bundled TWCA PEM to the system trust store (`create_default_context()` then `load_verify_locations()`). Never replace the store — that is pinning and breaks on vendor CA rotation. `verify=False` is FORBIDDEN in all code paths, including tests and the CLI.
 - The write path is unverified and actuates a physical fan and light. `ShadowClient.publish_desired` and `ZephyrClient.async_publish_desired` are the plumbing and belong in the library, but **`probe.py` is the only permitted caller** until the validation gate passes. Per spec section 7: no integration code writes to the shadow until the probe has confirmed each field against the real device.
 - `thingName`, `SN`, `MAC`, and `location` are personal data. Never log them at INFO or above; redact them in any diagnostic output.
 - AWS IoT constants: region `us-west-2`, service name `iotdevicegateway`, endpoint `a1nqxu0hki9zw3-ats.iot.us-west-2.amazonaws.com`, policy `RangeHoodPolicy`.
@@ -894,7 +894,7 @@ git commit -m "feat: add SigV4 presigned WebSocket URL builder"
 
 ---
 
-### Task 4: Pinned TLS bundle and REST API client
+### Task 4: TLS trust supplement and REST API client
 
 **Files:**
 - Create: `src/pyzephyrconnect/certs/twca.pem` (generated, then committed)
@@ -905,7 +905,7 @@ git commit -m "feat: add SigV4 presigned WebSocket URL builder"
 - Consumes: `const.DEVICE_API_LIST`, `const.DEVICE_API_DISCOVER`, `exceptions.ZephyrCertificateError`
 - Produces: `build_ssl_context() -> ssl.SSLContext`; `ZephyrApi(session: aiohttp.ClientSession, ssl_context: ssl.SSLContext | None = None)` with `async get_own_devices(id_token: str) -> list[dict]` and `async discover_device(id_token: str, thing_name: str) -> dict`
 
-- [ ] **Step 1: Generate the CA-only bundle**
+- [ ] **Step 1: Generate the supplementary CA bundle**
 
 The vendor's intermediate omits the Subject Key Identifier extension, so OpenSSL 3.x rejects the chain. Supplying the CA certificates as trust anchors resolves it. Keep only the TWCA certificates — excluding the leaf is what moves expiry from 2026-10-15 to 2030 and survives vendor leaf rotation.
 
@@ -1085,7 +1085,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'pyzephyrconnect.api'`
 """Vendor REST endpoints.
 
 The session is injected rather than owned, so Home Assistant can pass its
-shared client session. The pinned SSL context is applied per request, which
+shared client session. The SSL context is applied per request, which
 means a shared session needs no special construction.
 """
 
@@ -1201,7 +1201,7 @@ Expected: 7 passed
 
 ```bash
 git add -A
-git commit -m "feat: add pinned CA bundle and vendor REST client"
+git commit -m "feat: add supplementary CA bundle and vendor REST client"
 ```
 
 ---
@@ -1912,7 +1912,7 @@ class ShadowClient:
         )
         client.ws_set_options(path=f"{parts.path}?{parts.query}")
         # The IoT ATS endpoint chains to Amazon Root CA 1, which system trust
-        # stores already carry. Only the vendor REST host needs a pinned CA.
+        # stores already carry. Only the vendor REST host needs the extra CAs.
         client.tls_set()
         # paho retries indefinitely at a fixed short interval by default. Cap
         # the backoff so an expired credential does not become a hot loop.
