@@ -468,14 +468,41 @@ model, so the integration generalizes to other Zephyr hoods.
 Roughly 16 entities. `isOnline` becomes availability, combined with transport
 health — not a sensor.
 
-### 8.1 Filter percentage units
+### 8.1 Filter counter units — RESOLVED 2026-08-24
 
-`usegreasefiltertime: 642` against `maxGreasefilterTimer: 60` reconciles only if
-the counter is minutes and the maximum is hours (~10.7 h of 60 h). This is an
-inference. The sensor exposes the raw counter as an attribute so a wrong
-assumption is visibly wrong rather than silently producing a nonsense
-percentage. Confirmed during validation by observing counter movement against
-`usefantime`.
+`usegreasefiltertime` is in **MINUTES**, confirmed by direct observation: it
+ticked up while the fan ran. `maxGreasefilterTimer` (60) is in **HOURS**.
+
+Filter life percentage:
+
+```python
+used_fraction = use_grease_filter_time / (max_grease_filter_hours * 60)
+remaining_pct = 100 * (1 - used_fraction)
+```
+
+Sanity check against the reference device: 643 min against 60 h = 10.7 h of
+60 h = 18% used, and `cleangreasefilters` reads 0 (not yet due). Consistent.
+
+Hours is ruled out for the counter: 643 h against a 60 h life would be 10x
+overdue while the device reports the filter as fine. Seconds is ruled out on
+plausibility - it would make lifetime fan runtime 33 minutes on a hood with
+302,688 shadow revisions behind it.
+
+The same conversion applies to `usecharcoalfiltertime` against
+`maxCharcoalfilterTimer` (200 h), though that reads 0 on the reference
+device, which runs ducted.
+
+**`usefantime` and `uselighttime` are a DIFFERENT unit or granularity -
+OPEN.** `usefantime` held at 1980 through five minutes of fan running while
+`usegreasefiltertime` advanced. They cannot both be minutes on the same
+flush schedule. Most likely hours (1979 h lifetime fan runtime is plausible)
+or minutes flushed only rarely.
+
+This does not block the filter sensors, which use `usegreasefiltertime`.
+But the runtime diagnostic sensors must NOT be labelled with a unit until
+this is settled - shipping `usefantime` as minutes when it is hours would be
+wrong by 60x on a user-visible value. Ship them unitless (state_class
+TOTAL_INCREASING, no device_class) until measured over a longer window.
 
 ### 8.2 Device registry
 
