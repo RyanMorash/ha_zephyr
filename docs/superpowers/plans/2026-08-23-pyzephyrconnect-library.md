@@ -22,7 +22,7 @@ Every task's requirements implicitly include this section.
 - The library exposes an async surface. `pycognito` and `boto3` are blocking and MUST be wrapped in `asyncio.to_thread` inside the library, never pushed onto the caller.
 - No test may make a network call. All `aiohttp`, `paho`, `pycognito`, and `boto3` interactions are mocked.
 - TLS to `zephyr-prod-app.gemteks.com` uses the bundled CA-only PEM. `verify=False` is FORBIDDEN in all code paths, including tests and the CLI.
-- Nothing outside `probe.py` may publish to `$aws/things/<thing>/shadow/update`. The write path is unverified and actuates a physical fan and light.
+- The write path is unverified and actuates a physical fan and light. `ShadowClient.publish_desired` and `ZephyrClient.async_publish_desired` are the plumbing and belong in the library, but **`probe.py` is the only permitted caller** until the validation gate passes. Per spec section 7: no integration code writes to the shadow until the probe has confirmed each field against the real device.
 - `thingName`, `SN`, `MAC`, and `location` are personal data. Never log them at INFO or above; redact them in any diagnostic output.
 - AWS IoT constants: region `us-west-2`, service name `iotdevicegateway`, endpoint `a1nqxu0hki9zw3-ats.iot.us-west-2.amazonaws.com`, policy `RangeHoodPolicy`.
 
@@ -57,11 +57,14 @@ transport) and `exceptions.py` (a shared hierarchy every layer raises into).
 - Consumes: nothing
 - Produces: `const.REGION`, `const.USER_POOL`, `const.CLIENT_ID`, `const.CLIENT_SECRET`, `const.IDENTITY_POOL`, `const.IOT_ENDPOINT`, `const.IOT_SERVICE`, `const.POLICY_NAME`, `const.DEVICE_API_BASE`, `const.WRITABLE_FIELDS`; exception classes `ZephyrError`, `ZephyrAuthError`, `ZephyrCertificateError`, `ZephyrPolicyError`, `ZephyrTransportError`
 
-- [ ] **Step 1: Initialise the repository**
+- [ ] **Step 1: Create the source tree**
+
+The repo is ALREADY initialised on `main` (commit `7bc6373`) with
+`.gitattributes`, a full Python `.gitignore`, and a GPL-3.0 `LICENSE`. Do
+not run `git init`, and do not overwrite any of those three files.
 
 ```bash
 cd /Users/ryanmorash/Developer/pyzephyrconnect
-git init
 mkdir -p src/pyzephyrconnect/certs tests/fixtures
 ```
 
@@ -103,21 +106,20 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 ```
 
-- [ ] **Step 3: Write `.gitignore`**
+- [ ] **Step 3: Append project-specific ignores**
 
-```gitignore
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-dist/
-build/
-*.egg-info/
-.pytest_cache/
-.coverage
-htmlcov/
-.env
+The existing `.gitignore` is the standard Python template and already
+covers `__pycache__/`, `.venv/`, `dist/`, `*.egg-info/`, `.pytest_cache/`,
+`.coverage` and `.env`. Append only what it lacks — do NOT rewrite the file.
+
+```bash
+cd /Users/ryanmorash/Developer/pyzephyrconnect
+grep -q 'probe-capture' .gitignore || cat >> .gitignore <<'EOF'
+
+# pyzephyrconnect
 probe-capture-*.json
+.superpowers/
+EOF
 ```
 
 - [ ] **Step 4: Write the failing test**
@@ -1569,7 +1571,9 @@ git commit -m "feat: add Cognito auth with identity exchange and policy attach"
 Create `tests/test_shadow.py`:
 
 ```python
+import asyncio
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -1605,6 +1609,14 @@ def fake_paho(monkeypatch):
     client = MagicMock()
     client.subscribe.return_value = (0, 1)
     client.publish.return_value = MagicMock(rc=0)
+
+    def fire_connack(*args, **kwargs):
+        # Real paho invokes on_connect from its network thread once CONNACK
+        # arrives. Without this the mock never fires it, connect() blocks on
+        # its event and every connect test fails on a 15s timeout.
+        client.on_connect(client, None, {}, 0, None)
+
+    client.connect_async.side_effect = fire_connack
     monkeypatch.setattr(
         shadow_module.mqtt, "Client", MagicMock(return_value=client)
     )
@@ -1639,23 +1651,23 @@ async def test_connect_targets_port_443(fake_paho):
     assert args[1] == 443
 
 
-def test_denied_subscribe_raises_instead_of_looking_healthy(fake_paho):
+@pytest.mark.parametrize(
+    ("is_failure", "expectation"),
+    [
+        (True, pytest.raises(ZephyrPolicyError, match="attach")),
+        (False, nullcontext()),
+    ],
+    ids=["denied", "granted"],
+)
+def test_subscribe_grant_is_validated(fake_paho, is_failure, expectation):
     """paho reports success for a subscribe the broker refused. Granted QoS
     128 means denied, and the usual cause is a missing IoT policy. Without
     this check it presents as a working connection that receives nothing."""
     sc = _make()
-    denied = MagicMock()
-    denied.is_failure = True
-
-    with pytest.raises(ZephyrPolicyError, match="attach"):
-        sc._on_subscribe(fake_paho, None, 1, [denied], None)
-
-
-def test_granted_subscribe_is_accepted(fake_paho):
-    sc = _make()
-    ok = MagicMock()
-    ok.is_failure = False
-    sc._on_subscribe(fake_paho, None, 1, [ok], None)  # must not raise
+    code = MagicMock()
+    code.is_failure = is_failure
+    with expectation:
+        sc._on_subscribe(fake_paho, None, 1, [code], None)
 
 
 async def test_request_state_publishes_an_empty_get(fake_paho):
@@ -1695,27 +1707,38 @@ async def test_reconnect_uses_capped_exponential_backoff(fake_paho):
     assert kwargs["max_delay"] <= 300
 
 
-def test_incoming_message_is_dispatched_with_parsed_json(fake_paho):
+async def test_incoming_message_is_dispatched_with_parsed_json(fake_paho):
+    """Callbacks arrive on paho's thread and are marshalled onto the loop
+    with call_soon_threadsafe, so the dispatch needs a loop tick to land."""
     received = []
     sc = _make(on_message=lambda topic, payload: received.append((topic, payload)))
+    await sc.connect(CREDS)
 
     msg = MagicMock()
     msg.topic = f"$aws/things/{THING}/shadow/get/accepted"
     msg.payload = json.dumps({"state": {"reported": {"fan": 2}}}).encode()
     sc._on_message(fake_paho, None, msg)
+    await asyncio.sleep(0)
 
     assert received[0][0].endswith("get/accepted")
     assert received[0][1]["state"]["reported"]["fan"] == 2
 
 
-def test_malformed_payload_does_not_propagate(fake_paho):
-    """A parse error inside a paho callback thread would otherwise kill the
-    network loop and silently stop all updates."""
-    sc = _make()
+async def test_malformed_payload_is_dropped_without_dispatching(fake_paho):
+    """A parse error inside a paho callback thread would kill the network
+    loop and silently stop all updates. The payload must be dropped, and the
+    consumer must not be handed anything."""
+    received = []
+    sc = _make(on_message=lambda topic, payload: received.append((topic, payload)))
+    await sc.connect(CREDS)
+
     msg = MagicMock()
-    msg.topic = "whatever"
+    msg.topic = f"$aws/things/{THING}/shadow/get/accepted"
     msg.payload = b"not json"
-    sc._on_message(fake_paho, None, msg)  # must not raise
+    sc._on_message(fake_paho, None, msg)
+    await asyncio.sleep(0)
+
+    assert received == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2394,6 +2417,8 @@ The probe is the only code permitted to write to the shadow. Its rails are the l
 Create `tests/test_probe.py`:
 
 ```python
+from contextlib import nullcontext
+
 import pytest
 
 from pyzephyrconnect.probe import diff_states, parse_assignment, validate_write
@@ -2440,13 +2465,16 @@ def test_dangerous_fields_need_force_as_well_as_confirm():
             validate_write(field, confirmed=True, forced=False)
 
 
-def test_ordinary_writes_pass_with_confirm_alone():
-    for field in ("light", "fan", "power", "setdelaytimer"):
+@pytest.mark.parametrize("field", ["light", "fan", "power", "setdelaytimer"])
+def test_ordinary_writes_pass_with_confirm_alone(field):
+    with nullcontext():
         validate_write(field, confirmed=True, forced=False)
 
 
-def test_dangerous_writes_pass_with_both_flags():
-    validate_write("resetgreasefilter", confirmed=True, forced=True)
+@pytest.mark.parametrize("field", ["resetgreasefilter", "setrecirculating"])
+def test_dangerous_writes_pass_with_both_flags(field):
+    with nullcontext():
+        validate_write(field, confirmed=True, forced=True)
 
 
 def test_diff_reports_only_changed_keys():
@@ -2670,7 +2698,7 @@ sys.exit(run())
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_probe.py -v`
-Expected: 11 passed
+Expected: 15 passed
 
 - [ ] **Step 6: Move the protocol documentation into this repo**
 
