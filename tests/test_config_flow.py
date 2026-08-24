@@ -107,6 +107,23 @@ async def test_flow_releases_the_client_on_failure(hass: HomeAssistant, mock_cli
     mock_client.async_stop.assert_awaited()
 
 
+async def test_created_entry_actually_loads(hass: HomeAssistant, mock_client) -> None:
+    """Forwarding to platforms must succeed. Without stub platform modules
+    every entry lands in SETUP_ERROR while the flow still reports success."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], USER_INPUT
+    )
+    await hass.async_block_till_done()
+
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.state is ConfigEntryState.LOADED
+
+
 async def test_reauth_updates_the_password(hass: HomeAssistant, mock_client) -> None:
     entry = MockConfigEntry(
         version=1,
