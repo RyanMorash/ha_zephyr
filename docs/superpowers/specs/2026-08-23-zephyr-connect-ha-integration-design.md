@@ -384,11 +384,19 @@ Recommendation: option 1, named "Delay off" with an explicit description.
 Someone setting a delay-off timer on a range hood most likely does intend it
 to run. Option 2 is the fallback if that proves confusing in practice.
 
-**Still open:** at what fan speed does the hood start? If `power=1` restores
-previous levels, arming the timer may start the fan at whatever speed was
-last used - potentially speed 6. That materially affects how surprising
-option 1 is, and needs checking. Also unverified: whether the hood actually
-shuts off when `delaytimer` reaches 0.
+**Start speed — RESOLVED: fan speed 1.** Arming the timer from power-off
+consistently starts the fan at speed 1, NOT a restore of previous levels.
+(Contrast `power=1`, which does restore - fan 6 and the light.) So the two
+power-on paths differ: `power=1` resumes, arming the timer starts gently.
+
+This settles the recommendation on option 1. A `number` that starts the hood
+on its quietest setting is defensible write-through behaviour; one that
+jumped to speed 6 would not have been.
+
+**Still open:** whether the hood actually shuts off when `delaytimer`
+reaches 0. This is the one part of the feature never observed end to end,
+and it is the behaviour the entity is built around. Verify by arming a short
+timer (e.g. `setdelaytimer=60`) and leaving it.
 
 ### 7.6 Pattern: the app constrains more than the firmware
 
