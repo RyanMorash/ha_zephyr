@@ -25,10 +25,6 @@ SAFETY_NET_INTERVAL_SECONDS = 300
 # unavailable.
 DEGRADED_POLL_INTERVAL_SECONDS = 60
 
-# The device reports its countdown once a minute, so anything faster is
-# wasted work.
-DELAY_TIMER_STEP_SECONDS = 60
-
 # Upper bound offered for the delay-off number, in minutes. The device
 # accepts arbitrary values and its real ceiling is unknown; this is a sane
 # UI cap, not a device limit.

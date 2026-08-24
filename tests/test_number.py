@@ -68,3 +68,12 @@ def test_is_a_config_entity():
         ZephyrDelayNumber(_coordinator()).entity_category
         is EntityCategory.CONFIG
     )
+
+
+async def test_fractional_minutes_round_rather_than_truncate():
+    """HA's number.set_value validates only min/max, not step, so an
+    automation can pass a fractional minute. int() would truncate
+    0.6666666 * 60 == 39.999996 down to 39 instead of rounding to 40."""
+    coordinator = _coordinator()
+    await ZephyrDelayNumber(coordinator).async_set_native_value(0.6666666)
+    assert coordinator.async_set_state.call_args.args[0] == {"setdelaytimer": 40}

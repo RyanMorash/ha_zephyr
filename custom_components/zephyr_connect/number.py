@@ -69,5 +69,5 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
         device-managed state.
         """
         await self.coordinator.async_set_state(
-            {"setdelaytimer": int(value * SECONDS_PER_MINUTE)}
+            {"setdelaytimer": round(value * SECONDS_PER_MINUTE)}
         )
