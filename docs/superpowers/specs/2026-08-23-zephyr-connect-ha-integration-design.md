@@ -325,20 +325,24 @@ allowlist. It was added while (a) was still live and should be removed once
 the countdown behaviour below is settled, to keep the hardware-actuating
 allowlist as narrow as the evidence requires.
 
-**Countdown behaviour — OPEN.** Neither value decremented in the few seconds
-between the set command and a follow-up read. This does NOT establish that
-the timer is not running: a device reporting a per-second countdown would
-push ~300 shadow updates per timer, so it almost certainly reports at
-intervals or only on start/finish. Distinguish by watching over minutes, not
-seconds. Possible behaviours:
-  - counts down continuously once armed, reported at intervals
-  - counts only after the fan is switched off (classic hood delay-off)
-  - requires a separate trigger to start
+**Countdown behaviour — RESOLVED.** Once armed, `delaytimer` counts down
+continuously and the device reports it in 60-second steps
+(300 -> 240 -> 180 ...). It is not a per-second push, which is why a
+seconds-scale observation appeared static. Units confirmed as real seconds.
 
-Entity implication: the app presents discrete choices (5 and 10 minutes
-observed), so this maps to a `select` rather than a `number`, with options
-labelled in minutes and values written in seconds. The full option set still
-needs confirming from the app's picker.
+`delaytimer` is therefore device-managed status and was removed from the
+writable allowlist again (commit 87b0ed0). Clients write `setdelaytimer`
+only.
+
+Entity implication:
+- `select` for the delay setting - the app presents discrete choices (5 and
+  10 minutes observed), labelled in minutes, written in seconds
+  (5 min -> 300). The full option set still needs confirming from the app's
+  picker; if it turns out to be free-form, use a `number` in minutes with a
+  60x conversion instead.
+- `sensor` for delay remaining, sourced from `delaytimer`, device_class
+  DURATION, unit seconds. It updates about once a minute, so it is genuinely
+  useful rather than a static mirror of the setting.
 
 **Still open:** whether the DEVICE enforces the app's rule that the delay
 timer can only be set while power is on, or whether the app merely gates its
