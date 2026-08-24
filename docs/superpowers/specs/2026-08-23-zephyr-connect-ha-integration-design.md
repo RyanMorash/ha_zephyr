@@ -348,6 +348,31 @@ Entity implication:
   DURATION, unit seconds. Updates about once a minute, so it is genuinely
   useful rather than a static mirror of the setting.
 
+### 7.7 Clean air function — RESOLVED 2026-08-24
+
+`setcleanairfunction` is an operating mode, not a passive setting.
+
+| Write | Observed |
+|---|---|
+| `setcleanairfunction=1` | Clean air mode on, fan starts at speed 1 |
+| `setcleanairfunction=0` | Clean air mode off, hood powers down |
+
+The power-down on `0` is consistent with two readings and the observation
+cannot separate them: either turning the mode off explicitly powers the hood
+down, or clean air was the only thing running and the device dropped `power`
+because nothing remained - which matches the established behaviour in 7.3.
+The second is simpler and assumed; if it matters later, test by turning
+clean air off while the fan is separately running at speed 6.
+
+Entity implication: a plain `switch`, NOT an `EntityCategory.CONFIG` switch.
+It actuates the hood rather than configuring it, so it belongs alongside the
+fan and light rather than buried in the config section. Its description must
+note that enabling it starts the fan at speed 1.
+
+This is the third control (with the delay timer and `power`) where writing a
+value actuates the hood rather than merely recording a preference. Treat
+every `set*` field as potentially actuating until proven otherwise.
+
 ### 7.6 Pattern: the app constrains more than the firmware
 
 Observed three times now - the delay-timer presets, the rule that the timer
