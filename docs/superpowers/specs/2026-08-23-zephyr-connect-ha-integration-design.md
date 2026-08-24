@@ -261,10 +261,15 @@ that the device also maintains itself:
 Confirmed symmetric for the fan: writing `fan=N` starts the fan and the
 device raises `power` to 1 on its own, exactly as with `light`.
 
-**Open:** writing `power=1` from an all-off state is UNTESTED. If it does
-not start anything, a HA `switch` for power would have a no-op `turn_on`,
-which is poor UX - in that case expose it as an off-only control or fold
-"master off" into a button/service instead of a switch.
+**Resolved:** writing `power=1` from an all-off state RESTORES the previous
+levels - observed bringing back `fan=6` and `light=1` together. The device
+remembers the last-active levels across a power cycle.
+
+So `power` is a switch with real semantics in both directions:
+`turn_off` -> everything off; `turn_on` -> resume what was running. It maps
+cleanly to a HA `switch` entity; no off-only workaround needed.
+
+Fan range confirmed 0-6, matching `maxFanSpeed: 6`.
 
 It is **not a precondition**: `fan` and `light` are set directly and the
 device manages `power` in response. So `fan.turn_on` / `light.turn_on` write
