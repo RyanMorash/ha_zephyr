@@ -247,17 +247,54 @@ Device attended. Ordered most-reversible first.
 Step 9 is deferred until the filter is actually being cleaned. The accumulated
 counter cannot be reconstructed once reset.
 
-### 7.3 The `power` decision
+### 7.3 The `power` decision — RESOLVED 2026-08-24
 
-Step 3 determines the fan and light entity design:
+Established against the real device. `power` is a **writable master switch**
+that the device also maintains itself:
 
-- **Master switch** (fan/light require `power=1`) — `turn_on` writes `power=1`
-  alongside the level. No separate power entity.
-- **Derived** (reports 1 when anything is on) — read-only, not exposed as a
-  control.
-- **Independent standby** — gets its own `switch`.
+| Action | Observed |
+|---|---|
+| Write `power=0` | Device turns everything off (light 1 -> 0, ~1.2s later) |
+| Write `light=1` while `power=0` | Light comes on; device raises `power` to 1 on its own |
+| Light goes to 0 | Device drops `power` to 0 on its own |
 
-Implementation assumes *master switch* and is corrected after step 3.
+It is **not a precondition**: `fan` and `light` are set directly and the
+device manages `power` in response. So `fan.turn_on` / `light.turn_on` write
+only the level, never `power` alongside it.
+
+`power` is exposed as its own `switch` entity (master off), and its reported
+value is authoritative for whether the hood is running.
+
+An earlier draft of this spec concluded `power` was derived and read-only.
+That was wrong: every test behind it used `state.desired`, which this device
+ignores entirely (see 7.4), so the absence of a response carried no
+information about semantics.
+
+### 7.4 Control mechanism — CORRECTED 2026-08-24
+
+The write path is **not** `state.desired`. Captured from the vendor iOS
+app's own MQTT traffic via a wildcard subscription on
+`$aws/things/<thing>/shadow/#`:
+
+```
+<shadow>/update   {"state": {"reported": {"light": 1}}}
+```
+
+The app writes **`state.reported`** to `.../shadow/update`. This is
+backwards from the AWS convention (`reported` is normally device-authored),
+but it is what the device acts on. Writing `state.desired` is accepted by
+AWS and silently ignored by the device - no error, no rejection, and the
+desired block accumulates forever generating spurious deltas.
+
+Consequences for the integration:
+- `update/delta` must be ignored entirely. A delta is a desired-vs-reported
+  difference; since this vendor never writes `desired`, any delta is stale
+  or foreign and never represents device state. Folding deltas into cached
+  state makes the client report a wish back as if it were a confirmation.
+- After a write, AWS echoes `update/accepted` immediately with our own
+  value. The device's real confirmation arrives as a SECOND
+  `update/accepted` roughly 1.2-1.6s later, typically carrying a fuller
+  block. Treat only the device's report as authoritative.
 
 ## 8. Entity model
 
