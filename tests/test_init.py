@@ -224,6 +224,38 @@ async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> Non
     mock_client.async_poll.assert_awaited_once_with(THING)
 
 
+async def test_partial_setup_failure_leaves_no_orphan_timers(
+    hass, entry, mock_client
+) -> None:
+    """If a later hood fails to initialise, earlier coordinators must be
+    shut down. Each initialised coordinator arms HA's periodic timer, so a
+    leaked one keeps firing forever against a stopped client."""
+    first, second = _caps(), _caps()
+    second.thing_name = "bbbbbbbbccccccccddddddddeeeeeeeeffffffff"
+    mock_client.async_setup = AsyncMock(return_value=[first, second])
+
+    # First hood starts fine; the second fails.
+    mock_client.async_start = AsyncMock(
+        side_effect=[None, ZephyrError("hood 2 unreachable")]
+    )
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+    # Nothing should still be polling on behalf of the abandoned setup.
+    mock_client.async_refresh_if_needed.reset_mock()
+    mock_client.async_poll.reset_mock()
+    async_fire_time_changed(
+        hass,
+        dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
+    )
+    await hass.async_block_till_done()
+
+    mock_client.async_refresh_if_needed.assert_not_awaited()
+    mock_client.async_poll.assert_not_awaited()
+
+
 async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
     """A disconnected tick must poll every time, not just at the safety-net
     cadence used while connected."""
