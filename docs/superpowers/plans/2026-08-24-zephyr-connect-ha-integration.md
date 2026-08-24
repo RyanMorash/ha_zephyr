@@ -53,7 +53,7 @@ and the same behaviour the vendor app exhibits.
 | `usegreasefiltertime` | no | **Minutes.** Against `maxGreasefilterTimer` in **hours**. |
 | `usefantime`, `uselighttime` | no | **Hours** (inferred, see below). Did NOT move during 5 min of fan runtime while `usegreasefiltertime` did. |
 | `isOnline` | no | Availability. |
-| `act` | no | Diagnostic string. Only `"Disabled"` ever observed. |
+| `act` | no | **Airflow Control Technology (ACT).** Zephyr's airflow cap for make-up-air code compliance. Set PHYSICALLY on the hood - not settable from the cloud at all. `"Disabled"` observed. |
 
 ### Filter life — verified against the vendor app
 
@@ -2137,10 +2137,10 @@ def test_delay_remaining_is_seconds():
     assert sensor.native_unit_of_measurement == UnitOfTime.SECONDS
 
 
-def test_mode_sensor_surfaces_the_unknown_act_field():
-    """Only "Disabled" has ever been observed. Exposing it is how we learn
-    what else exists, from other users' devices."""
-    assert _sensor("mode").native_value == "Disabled"
+def test_act_sensor_reports_airflow_control_technology():
+    """ACT is Zephyr's Airflow Control Technology - an airflow cap for
+    make-up-air code compliance, set physically on the hood. Read-only."""
+    assert _sensor("act").native_value == "Disabled"
 
 
 @pytest.mark.parametrize(
@@ -2279,12 +2279,14 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         value_fn=lambda state, _caps: state.delay_timer,
     ),
     ZephyrSensorDescription(
-        key="mode",
-        translation_key="mode",
+        key="act",
+        translation_key="act",
         entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        # Only "Disabled" has ever been observed. Surfacing it is how other
-        # models' values get discovered.
+        # Airflow Control Technology: Zephyr's airflow cap for make-up-air
+        # code compliance. Configured PHYSICALLY on the hood and not
+        # settable from the cloud, so this is strictly a readout - but a
+        # meaningful one, since ACT being enabled explains why the hood's
+        # airflow is limited. Enabled by default for that reason.
         value_fn=lambda state, _caps: state.act or None,
     ),
     ZephyrSensorDescription(
@@ -2789,7 +2791,7 @@ Merge this `"entity"` block alongside the existing `"config"` block:
       "fan_runtime": { "name": "Fan runtime" },
       "light_runtime": { "name": "Light runtime" },
       "delay_remaining": { "name": "Delay remaining" },
-      "mode": { "name": "Mode" },
+      "act": { "name": "Airflow Control Technology" },
       "recirculating": { "name": "Ventilation" }
     },
     "binary_sensor": {
@@ -2897,6 +2899,7 @@ you use in the Zephyr Connect app.
 | Grease / charcoal filter | Percentage of life remaining |
 | Fan / light runtime | Diagnostic, disabled by default |
 | Delay remaining | Counts down, updates once a minute |
+| Airflow Control Technology | Read-only; ACT is set physically on the hood |
 | Fan, filter and fault problem sensors | |
 
 Entities are created from the capabilities your hood reports, so a model
@@ -3018,7 +3021,8 @@ Carried forward deliberately, none blocking:
   as hours; a one-line change per sensor if wrong.
 - **`setrecirculating` is read-only.** Untestable on ducted hardware, and
   writing it risks corrupting filter accounting.
-- **`act` values beyond `"Disabled"` are unknown.** The diagnostic sensor
-  exists to discover them.
+- **`act` values beyond `"Disabled"` are unknown**, though the field itself
+  is understood: Airflow Control Technology, set physically on the hood. The
+  enabled-state string is simply unobserved.
 - **Whether the hood self-stops at `delaytimer: 0`** was never observed end
   to end.
