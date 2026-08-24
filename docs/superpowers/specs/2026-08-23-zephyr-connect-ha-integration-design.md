@@ -480,8 +480,16 @@ used_fraction = use_grease_filter_time / (max_grease_filter_hours * 60)
 remaining_pct = 100 * (1 - used_fraction)
 ```
 
-Sanity check against the reference device: 643 min against 60 h = 10.7 h of
-60 h = 18% used, and `cleangreasefilters` reads 0 (not yet due). Consistent.
+**Verified against the vendor app.** With `usegreasefiltertime` at 643 the
+formula yields 82.14% remaining, and the app displays **82%**. This is
+independent confirmation from the vendor's own implementation, not merely
+internal consistency.
+
+The rival hypotheses are excluded outright by the same check:
+- counter in seconds -> 99.70%, the app would show 100%
+- `maxGreasefilterTimer` in minutes -> -972%, nonsensical
+
+`cleangreasefilters` reads 0 (not yet due), also consistent.
 
 Hours is ruled out for the counter: 643 h against a 60 h life would be 10x
 overdue while the device reports the filter as fine. Seconds is ruled out on
