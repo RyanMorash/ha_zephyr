@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -12,7 +15,28 @@ from pyzephyrconnect import ZephyrAuthError, ZephyrClient, ZephyrError
 from .const import PLATFORMS
 from .coordinator import ZephyrCoordinator
 
-type ZephyrConfigEntry = ConfigEntry[list[ZephyrCoordinator]]
+
+@dataclass(frozen=True)
+class ZephyrData:
+    """Runtime state stored on the config entry as `entry.runtime_data`.
+
+    `client` is the single ZephyrClient shared by every hood on the account
+    (one MQTT/HTTPS connection, reused across hoods) - keep a reference here
+    so unload can stop it without depending on `coordinators` being
+    non-empty. `coordinators` holds one ZephyrCoordinator per hood.
+
+    Iterate this object directly to enumerate the per-hood coordinators,
+    e.g. `for coordinator in entry.runtime_data: ...`.
+    """
+
+    client: ZephyrClient
+    coordinators: list[ZephyrCoordinator] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[ZephyrCoordinator]:
+        return iter(self.coordinators)
+
+
+type ZephyrConfigEntry = ConfigEntry[ZephyrData]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> bool:
@@ -38,11 +62,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> bo
             coordinator = ZephyrCoordinator(hass, entry, client, caps)
             await coordinator.async_initialise()
             coordinators.append(coordinator)
+    except ZephyrAuthError as err:
+        # ZephyrAuthError subclasses ZephyrError, so it must be caught here
+        # first - otherwise an auth failure raised inside async_initialise()
+        # (e.g. from async_start()) falls through to the ZephyrError clause
+        # below and gets downgraded to ConfigEntryNotReady, which retries
+        # forever instead of prompting the user to reauthenticate.
+        await client.async_stop()
+        raise ConfigEntryAuthFailed(str(err)) from err
     except ZephyrError as err:
         await client.async_stop()
         raise ConfigEntryNotReady(str(err)) from err
 
-    entry.runtime_data = coordinators
+    entry.runtime_data = ZephyrData(client=client, coordinators=coordinators)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -53,7 +85,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> b
     if unloaded:
         for coordinator in entry.runtime_data:
             await coordinator.async_shutdown()
-        # One client is shared across every hood on the account.
-        if entry.runtime_data:
-            await entry.runtime_data[0].client.async_stop()
+        # The client is stored directly on runtime_data (not reached via
+        # coordinators[0]) so it is always stopped, even for an account with
+        # zero hoods and therefore an empty coordinators list.
+        await entry.runtime_data.client.async_stop()
     return unloaded

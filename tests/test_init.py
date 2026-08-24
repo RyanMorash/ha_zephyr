@@ -16,6 +16,7 @@ from custom_components.zephyr_connect.const import (
     DEGRADED_POLL_INTERVAL_SECONDS,
     DOMAIN,
 )
+from custom_components.zephyr_connect.coordinator import SAFETY_NET_TICKS
 from pyzephyrconnect import ZephyrAuthError, ZephyrError
 
 THING = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
@@ -102,6 +103,21 @@ async def test_auth_failure_triggers_reauth(hass, entry, mock_client) -> None:
     assert entry.state is ConfigEntryState.SETUP_ERROR
 
 
+async def test_auth_failure_during_hood_init_triggers_reauth(
+    hass, entry, mock_client
+) -> None:
+    """ZephyrAuthError subclasses ZephyrError. An auth failure raised from
+    inside the per-hood loop (via async_start(), called by
+    coordinator.async_initialise()) must still surface as ConfigEntryAuthFailed
+    and land in SETUP_ERROR, not be caught by the broader ZephyrError clause
+    and downgraded to a perpetual SETUP_RETRY."""
+    mock_client.async_start.side_effect = ZephyrAuthError("expired")
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    mock_client.async_stop.assert_awaited()
+
+
 async def test_transient_failure_retries(hass, entry, mock_client) -> None:
     """A vendor outage must retry, not permanently fail the entry."""
     mock_client.async_setup.side_effect = ZephyrError("vendor down")
@@ -112,6 +128,21 @@ async def test_transient_failure_retries(hass, entry, mock_client) -> None:
 
 async def test_unload_stops_the_client(hass, entry, mock_client) -> None:
     """Leaving the MQTT connection open would leak a paho thread per reload."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    mock_client.async_stop.assert_awaited()
+
+
+async def test_unload_stops_client_with_no_hoods(hass, entry, mock_client) -> None:
+    """The shared client is stored directly on runtime_data, not reached via
+    runtime_data[0].client, so it must still be stopped when the account has
+    zero hoods and coordinators is empty."""
+    mock_client.async_setup.return_value = []
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -152,3 +183,61 @@ async def test_refresh_is_attempted_on_the_update_tick(hass, entry, mock_client)
     await hass.async_block_till_done()
 
     mock_client.async_refresh_if_needed.assert_awaited()
+
+
+async def test_safety_net_does_not_poll_before_threshold(
+    hass, entry, mock_client
+) -> None:
+    """While connected, cached state is used for ticks short of the
+    safety-net cadence - no real poll should happen yet."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    mock_client.async_poll.reset_mock()
+
+    now = dt_util.utcnow()
+    for i in range(1, SAFETY_NET_TICKS):
+        async_fire_time_changed(
+            hass,
+            now + timedelta(seconds=(DEGRADED_POLL_INTERVAL_SECONDS + 1) * i),
+        )
+        await hass.async_block_till_done()
+
+    mock_client.async_poll.assert_not_awaited()
+
+
+async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> None:
+    """Every SAFETY_NET_TICKS-th connected tick must perform a real re-read,
+    so a push missed while the transport was briefly unhealthy is eventually
+    caught even though the connection never dropped."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    mock_client.async_poll.reset_mock()
+
+    now = dt_util.utcnow()
+    for i in range(1, SAFETY_NET_TICKS + 1):
+        async_fire_time_changed(
+            hass,
+            now + timedelta(seconds=(DEGRADED_POLL_INTERVAL_SECONDS + 1) * i),
+        )
+        await hass.async_block_till_done()
+
+    mock_client.async_poll.assert_awaited_once_with(THING)
+
+
+async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
+    """A disconnected tick must poll every time, not just at the safety-net
+    cadence used while connected."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    mock_client.async_poll.reset_mock()
+    mock_client.connected = False
+
+    now = dt_util.utcnow()
+    for i in range(1, 4):
+        async_fire_time_changed(
+            hass,
+            now + timedelta(seconds=(DEGRADED_POLL_INTERVAL_SECONDS + 1) * i),
+        )
+        await hass.async_block_till_done()
+
+    assert mock_client.async_poll.await_count == 3

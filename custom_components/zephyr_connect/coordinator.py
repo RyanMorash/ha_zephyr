@@ -18,9 +18,18 @@ from pyzephyrconnect import (
     ZephyrError,
 )
 
-from .const import DEGRADED_POLL_INTERVAL_SECONDS, DOMAIN
+from .const import (
+    DEGRADED_POLL_INTERVAL_SECONDS,
+    DOMAIN,
+    SAFETY_NET_INTERVAL_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+# Every this-many-th connected tick, _async_update_data() performs a real
+# poll instead of returning cached state, catching anything missed while
+# push was briefly unhealthy. See _async_update_data() and __init__().
+SAFETY_NET_TICKS = max(1, SAFETY_NET_INTERVAL_SECONDS // DEGRADED_POLL_INTERVAL_SECONDS)
 
 
 class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
@@ -43,6 +52,10 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
         self.capabilities = capabilities
         self.thing_name = capabilities.thing_name
         self._unsubscribe: Any = None
+        # Counts consecutive connected ticks since the last real poll (either
+        # a safety-net poll below, or a degraded poll while disconnected).
+        # Reaching SAFETY_NET_TICKS triggers a safety-net poll and resets it.
+        self._connected_ticks = 0
         super().__init__(
             hass,
             _LOGGER,
@@ -65,10 +78,18 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
         # DataUpdateCoordinator only arms its periodic timer while it has at
         # least one registered listener (see async_add_listener /
         # _schedule_refresh in homeassistant.helpers.update_coordinator).
-        # Entities normally provide that listener, but the credential
-        # refresh and degraded-poll fallback below must keep running even
-        # before any entity has subscribed, so register a permanent no-op
-        # listener of our own.
+        # HA's convention is that this is a *feature*: stop polling when
+        # nothing is listening, e.g. because the user disabled every entity
+        # for this hood. We deliberately override that convention here,
+        # because this coordinator's periodic tick does more than refresh
+        # entity data - it also refreshes cloud credentials that expire
+        # hourly (see async_refresh_if_needed() in _async_update_data()). If
+        # the tick stopped, credentials would lapse, the push (MQTT)
+        # connection would die once they did, and nothing would be left
+        # running to reconnect it or notice - the hood would go permanently
+        # stale even though its entities still exist and are simply idle.
+        # So polling must continue regardless of listener count, and we
+        # register a permanent no-op listener of our own to force that.
         self.async_add_listener(lambda: None)
         # Seed from whatever the library already cached during setup, so
         # entities have data before the first device report arrives.
@@ -98,6 +119,21 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
 
         if not self.client.connected:
             _LOGGER.debug("push transport down; reading state over HTTPS")
+            self._connected_ticks = 0
+            try:
+                return await self.client.async_poll(self.thing_name)
+            except ZephyrAuthError as err:
+                raise ConfigEntryAuthFailed(str(err)) from err
+            except ZephyrError as err:
+                raise UpdateFailed(str(err)) from err
+
+        self._connected_ticks += 1
+        if self._connected_ticks >= SAFETY_NET_TICKS:
+            # Safety net: push normally covers everything, but re-read for
+            # real every SAFETY_NET_TICKS-th connected tick in case a push
+            # was missed while the transport was briefly unhealthy.
+            _LOGGER.debug("safety-net re-read: polling despite active push")
+            self._connected_ticks = 0
             try:
                 return await self.client.async_poll(self.thing_name)
             except ZephyrAuthError as err:
