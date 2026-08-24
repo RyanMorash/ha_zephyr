@@ -470,6 +470,9 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except ZephyrError:
                 errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error during Zephyr reauth")
+                errors["base"] = "unknown"
             else:
                 return self.async_update_reload_and_abort(
                     entry, data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]}
@@ -536,6 +539,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+```
+
+- [ ] **Step 9b: Create no-op stubs for the seven platform modules**
+
+`async_forward_entry_setups` imports every platform listed in `PLATFORMS`.
+Those modules are not written until Tasks 4-6, so without stubs any real
+entry setup raises `ModuleNotFoundError` and lands in `SETUP_ERROR` - and
+Task 2's test, which asserts the entry reaches `LOADED`, would fail outright.
+
+Each later task replaces its own stub wholesale.
+
+```bash
+cd /Users/ryanmorash/Developer/ha_zephyr
+for platform in binary_sensor button fan light number sensor switch; do
+  python3 - "$platform" <<'PYEOF'
+import sys, pathlib
+name = sys.argv[1]
+body = '"""' + name + ''' platform for Zephyr Connect.
+
+Placeholder so async_forward_entry_setups can import this platform. The
+real implementation arrives in a later task and replaces this file.
+"""
+
+from __future__ import annotations
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """No entities yet."""
+'''
+pathlib.Path(f"custom_components/zephyr_connect/{name}.py").write_text(body)
+PYEOF
+done
+ls custom_components/zephyr_connect/*.py
 ```
 
 - [ ] **Step 10: Install test dependencies and run**
@@ -1108,7 +1152,7 @@ git commit -m "feat: add entity base with device info and availability"
 The two controls people touch daily. Both write only their own level — the device raises `power` itself, so writing `power` alongside would be redundant and could fight the device.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/fan.py`, `custom_components/zephyr_connect/light.py`
+- Replace (these exist as no-op stubs from Task 1): `custom_components/zephyr_connect/fan.py`, `custom_components/zephyr_connect/light.py`
 - Test: `tests/test_fan.py`, `tests/test_light.py`
 
 **Interfaces:**
@@ -1539,7 +1583,7 @@ git commit -m "feat: add fan and light platforms"
 Every control here **actuates the hood** rather than storing a preference — validated behaviour, not an assumption. The delay-off number in particular starts the fan when written, which its description must say plainly.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/switch.py`, `number.py`, `button.py`
+- Replace (no-op stubs from Task 1): `custom_components/zephyr_connect/switch.py`, `number.py`, `button.py`
 - Test: `tests/test_switch.py`, `tests/test_number.py`, `tests/test_button.py`
 
 **Interfaces:**
@@ -2016,7 +2060,7 @@ git commit -m "feat: add switch, number and button platforms"
 The filter-life sensor carries the formula verified against the vendor app's 82%. Get its unit conversion wrong and every user sees a wrong number.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/sensor.py`, `binary_sensor.py`
+- Replace (no-op stubs from Task 1): `custom_components/zephyr_connect/sensor.py`, `binary_sensor.py`
 - Test: `tests/test_sensor.py`, `tests/test_binary_sensor.py`
 
 **Interfaces:**
