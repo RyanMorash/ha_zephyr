@@ -512,6 +512,38 @@ this is settled - shipping `usefantime` as minutes when it is hours would be
 wrong by 60x on a user-visible value. Ship them unitless (state_class
 TOTAL_INCREASING, no device_class) until measured over a longer window.
 
+### 8.1b Recirculating — DO NOT SHIP AS WRITABLE (v1)
+
+`Recirculating: 1` in the capability document means the MODEL supports
+recirculating, not that the unit is installed that way. The reference hood
+reports `Recirculating: 1` but is physically ducted, with
+`setrecirculating: 0`.
+
+`setrecirculating` is therefore an *installation* setting describing how the
+hood is physically fitted - set once at install, essentially never changed.
+
+Decision: expose it **read-only** in v1, as a diagnostic sensor showing
+ducted vs recirculating. Do NOT ship a writable switch.
+
+Rationale:
+- It is untestable on the reference hardware (physically ducted), so a
+  writable control would ship unverified.
+- Writing it changes which filter the hood accounts against. Flipping a
+  ducted hood to recirculating starts charcoal-filter accounting for a
+  filter that is not installed, and skews the grease-filter tracking that
+  section 8.1 verified against the vendor app.
+- The upside is negligible: a set-once install setting does not need a HA
+  control, and users who genuinely need to change it have the vendor app.
+
+The earlier design gated a writable switch on `Recirculating == 1`. That was
+based on misreading the capability flag as installation state.
+
+**Charcoal filter sensor:** still created when `maxCharcoalfilterTimer > 0`,
+since that is a model capability. On a ducted install it simply reads full
+(usage stays 0), which is correct rather than misleading. Do not gate its
+existence on `setrecirculating`, which would make the entity appear and
+disappear.
+
 ### 8.2 Device registry
 
 One HA device per thing:
