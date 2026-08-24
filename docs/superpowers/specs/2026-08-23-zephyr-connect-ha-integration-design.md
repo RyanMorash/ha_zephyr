@@ -334,15 +334,30 @@ seconds-scale observation appeared static. Units confirmed as real seconds.
 writable allowlist again (commit 87b0ed0). Clients write `setdelaytimer`
 only.
 
+**The app's presets are not device limits.** The picker offers only 5 and
+10 minutes, but writing `setdelaytimer=60` (one minute) was accepted. The
+device takes arbitrary second values; the app is constraining its own UI.
+
 Entity implication:
-- `select` for the delay setting - the app presents discrete choices (5 and
-  10 minutes observed), labelled in minutes, written in seconds
-  (5 min -> 300). The full option set still needs confirming from the app's
-  picker; if it turns out to be free-form, use a `number` in minutes with a
-  60x conversion instead.
+- `number` for the delay setting, NOT a `select`. HA can expose finer
+  control than the vendor app allows. Displayed in minutes, written in
+  seconds (x60). Lower bound 0 (off). **Upper bound unknown** - not worth
+  probing exhaustively; pick a sane cap (e.g. 60 minutes) and treat a
+  rejected write as the real ceiling if a user ever hits it.
 - `sensor` for delay remaining, sourced from `delaytimer`, device_class
-  DURATION, unit seconds. It updates about once a minute, so it is genuinely
+  DURATION, unit seconds. Updates about once a minute, so it is genuinely
   useful rather than a static mirror of the setting.
+
+### 7.6 Pattern: the app constrains more than the firmware
+
+Observed twice now - the delay-timer presets, and (probably) the rule that
+the timer can only be set while power is on. The vendor app's UI limits are
+not evidence of device limits.
+
+Practical consequence: do not infer device constraints from what the app
+refuses to offer. Test the device directly. This integration can legitimately
+expose capability the vendor app does not, provided each case is verified
+against hardware rather than assumed.
 
 **Still open:** whether the DEVICE enforces the app's rule that the delay
 timer can only be set while power is on, or whether the app merely gates its
