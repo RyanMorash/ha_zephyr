@@ -316,28 +316,24 @@ Established by observing the vendor app.
 **Units are SECONDS, not minutes.** Selecting 5 minutes in the app writes
 `300`; 10 minutes writes `600`. An earlier draft assumed minutes - wrong.
 
-**Both fields end up at the same value** - `setdelaytimer` and `delaytimer`
-both read 300. But this does NOT establish that the app writes both. Two
-explanations fit equally:
+**Only `setdelaytimer` needs writing — RESOLVED.** Writing
+`setdelaytimer=300` alone caused the DEVICE to set `delaytimer` to 300 in
+response. Hypothesis (b) confirmed; the app was never writing both fields.
 
-  (a) the app publishes both fields together, or
-  (b) the app publishes only `setdelaytimer`, and the DEVICE sets
-      `delaytimer` in response.
+Consequence: `delaytimer` does not need to be in the probe's writable
+allowlist. It was added while (a) was still live and should be removed once
+the countdown behaviour below is settled, to keep the hardware-actuating
+allowlist as narrow as the evidence requires.
 
-Observing the resulting shadow state cannot distinguish them. `delaytimer`
-was added to the writable allowlist so (a) can be tested, but if (b) holds
-it should arguably come back out.
-
-An earlier `setdelaytimer=5` write produced no countdown, but that is not
-evidence for (a): 5 seconds is likely below any sane minimum and may have
-been rejected or elapsed instantly.
-
-**Test that distinguishes them:** write `setdelaytimer=300` alone and watch.
-If `delaytimer` follows to 300 and counts down, (b) holds and one field
-suffices. If it stays 0, try writing both. Alternatively, capture the app's
-raw publish on `<shadow>/update` via the wildcard subscription - that shows
-verbatim which fields the app sends, the same technique that established the
-reported-vs-desired write path.
+**Countdown behaviour — OPEN.** Neither value decremented in the few seconds
+between the set command and a follow-up read. This does NOT establish that
+the timer is not running: a device reporting a per-second countdown would
+push ~300 shadow updates per timer, so it almost certainly reports at
+intervals or only on start/finish. Distinguish by watching over minutes, not
+seconds. Possible behaviours:
+  - counts down continuously once armed, reported at intervals
+  - counts only after the fan is switched off (classic hood delay-off)
+  - requires a separate trigger to start
 
 Entity implication: the app presents discrete choices (5 and 10 minutes
 observed), so this maps to a `select` rather than a `number`, with options
