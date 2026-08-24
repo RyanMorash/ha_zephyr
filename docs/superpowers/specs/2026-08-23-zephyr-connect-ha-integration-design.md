@@ -316,13 +316,28 @@ Established by observing the vendor app.
 **Units are SECONDS, not minutes.** Selecting 5 minutes in the app writes
 `300`; 10 minutes writes `600`. An earlier draft assumed minutes - wrong.
 
-**Arming writes BOTH fields.** The app sets `setdelaytimer` AND `delaytimer`
-to the same value together. `delaytimer` is therefore not a read-only
-countdown: it is part of the arming write, and was wrongly excluded from the
-probe's writable allowlist until this was observed.
+**Both fields end up at the same value** - `setdelaytimer` and `delaytimer`
+both read 300. But this does NOT establish that the app writes both. Two
+explanations fit equally:
 
-Writing `setdelaytimer` alone does nothing - `delaytimer` stayed 0 and no
-countdown began.
+  (a) the app publishes both fields together, or
+  (b) the app publishes only `setdelaytimer`, and the DEVICE sets
+      `delaytimer` in response.
+
+Observing the resulting shadow state cannot distinguish them. `delaytimer`
+was added to the writable allowlist so (a) can be tested, but if (b) holds
+it should arguably come back out.
+
+An earlier `setdelaytimer=5` write produced no countdown, but that is not
+evidence for (a): 5 seconds is likely below any sane minimum and may have
+been rejected or elapsed instantly.
+
+**Test that distinguishes them:** write `setdelaytimer=300` alone and watch.
+If `delaytimer` follows to 300 and counts down, (b) holds and one field
+suffices. If it stays 0, try writing both. Alternatively, capture the app's
+raw publish on `<shadow>/update` via the wildcard subscription - that shows
+verbatim which fields the app sends, the same technique that established the
+reported-vs-desired write path.
 
 Entity implication: the app presents discrete choices (5 and 10 minutes
 observed), so this maps to a `select` rather than a `number`, with options
