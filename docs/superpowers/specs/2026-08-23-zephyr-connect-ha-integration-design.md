@@ -45,7 +45,7 @@ repo boundary does not cut across an active edit loop.
 During development the component depends on the library by git URL:
 
 ```json
-"requirements": ["pyzephyrconnect @ git+https://github.com/<owner>/pyzephyrconnect@main"]
+"requirements": ["pyzephyrconnect @ git+https://github.com/RyanMorash/pyzephyrconnect@main"]
 ```
 
 Before the HACS release this is pinned to a real version (`pyzephyrconnect==0.1.0`).
