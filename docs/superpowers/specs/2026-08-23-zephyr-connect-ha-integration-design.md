@@ -258,6 +258,14 @@ that the device also maintains itself:
 | Write `light=1` while `power=0` | Light comes on; device raises `power` to 1 on its own |
 | Light goes to 0 | Device drops `power` to 0 on its own |
 
+Confirmed symmetric for the fan: writing `fan=N` starts the fan and the
+device raises `power` to 1 on its own, exactly as with `light`.
+
+**Open:** writing `power=1` from an all-off state is UNTESTED. If it does
+not start anything, a HA `switch` for power would have a no-op `turn_on`,
+which is poor UX - in that case expose it as an off-only control or fold
+"master off" into a button/service instead of a switch.
+
 It is **not a precondition**: `fan` and `light` are set directly and the
 device manages `power` in response. So `fan.turn_on` / `light.turn_on` write
 only the level, never `power` alongside it.
