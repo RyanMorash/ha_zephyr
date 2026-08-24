@@ -309,19 +309,31 @@ Consequences for the integration:
   `update/accepted` roughly 1.2-1.6s later, typically carrying a fuller
   block. Treat only the device's report as authoritative.
 
-### 7.5 Delay timer preconditions — OPEN
+### 7.5 Delay timer — RESOLVED 2026-08-24
 
-The vendor app only exposes the delay-timer control when power is on. It is
-not yet established whether the DEVICE enforces this or the app merely gates
-its own UI. The distinction drives entity design:
+Established by observing the vendor app.
 
-- Device-enforced -> the delay-timer entity must become unavailable when
-  `power == 0`, otherwise writes vanish silently and the entity displays a
-  value the hood is not honouring.
-- App-only gating -> the entity is always available.
+**Units are SECONDS, not minutes.** Selecting 5 minutes in the app writes
+`300`; 10 minutes writes `600`. An earlier draft assumed minutes - wrong.
 
-Test: with `power=0`, write `setdelaytimer` and check whether the value
-holds, reverts, or snaps to 0.
+**Arming writes BOTH fields.** The app sets `setdelaytimer` AND `delaytimer`
+to the same value together. `delaytimer` is therefore not a read-only
+countdown: it is part of the arming write, and was wrongly excluded from the
+probe's writable allowlist until this was observed.
+
+Writing `setdelaytimer` alone does nothing - `delaytimer` stayed 0 and no
+countdown began.
+
+Entity implication: the app presents discrete choices (5 and 10 minutes
+observed), so this maps to a `select` rather than a `number`, with options
+labelled in minutes and values written in seconds. The full option set still
+needs confirming from the app's picker.
+
+**Still open:** whether the DEVICE enforces the app's rule that the delay
+timer can only be set while power is on, or whether the app merely gates its
+own UI. Device-enforced means the entity must go unavailable when
+`power == 0`. Test by writing the pair with `power=0` and seeing whether the
+values hold.
 
 ## 8. Entity model
 
