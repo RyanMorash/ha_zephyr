@@ -350,8 +350,51 @@ Entity implication:
 
 ### 7.6 Pattern: the app constrains more than the firmware
 
-Observed twice now - the delay-timer presets, and (probably) the rule that
-the timer can only be set while power is on. The vendor app's UI limits are
+Observed three times now - the delay-timer presets, the rule that the timer
+can only be set while power is on (confirmed UI-only), and the preset
+values themselves. The vendor app's UI limits are
+not evidence of device limits.
+
+Practical consequence: do not infer device constraints from what the app
+refuses to offer. Test the device directly. This integration can legitimately
+expose capability the vendor app does not, provided each case is verified
+against hardware rather than assumed.
+
+**Power precondition — RESOLVED: not device-enforced.** Writing
+`setdelaytimer=300` with `power=0` succeeded: both timer values were set.
+The app's rule that the timer is only settable while powered is UI-only.
+
+**But writing it POWERS THE HOOD ON.** This is a side effect, not a
+configuration change. Functionally coherent for a delay-off feature ("run,
+then stop after N seconds"), but it breaks the naive entity mapping.
+
+A HA `number` that starts a fan when adjusted is a bad surprise - especially
+for automations that set it expecting a passive change. Options for Plan 2:
+
+  1. `number` that writes through, with the side effect documented in the
+     entity description. Simplest, matches device behaviour, but the
+     surprise is real.
+  2. Local `number` holding the duration without writing, plus a `button`
+     ("Run with delay off") that arms it. Decouples configuration from
+     actuation, at the cost of the number no longer mirroring device state.
+  3. `number` whose writes are only sent while `power == 1`, mimicking the
+     app. Avoids the surprise but silently drops user input when off.
+
+Recommendation: option 1, named "Delay off" with an explicit description.
+Someone setting a delay-off timer on a range hood most likely does intend it
+to run. Option 2 is the fallback if that proves confusing in practice.
+
+**Still open:** at what fan speed does the hood start? If `power=1` restores
+previous levels, arming the timer may start the fan at whatever speed was
+last used - potentially speed 6. That materially affects how surprising
+option 1 is, and needs checking. Also unverified: whether the hood actually
+shuts off when `delaytimer` reaches 0.
+
+### 7.6 Pattern: the app constrains more than the firmware
+
+Observed three times now - the delay-timer presets, the rule that the timer
+can only be set while power is on (confirmed UI-only), and the preset
+values themselves. The vendor app's UI limits are
 not evidence of device limits.
 
 Practical consequence: do not infer device constraints from what the app
