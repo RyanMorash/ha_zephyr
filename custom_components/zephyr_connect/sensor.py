@@ -129,6 +129,7 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         value_fn=lambda state, _caps: (
             "recirculating" if state.set_recirculating else "ducted"
         ),
+        exists_fn=lambda caps: caps.supports_recirculating,
     ),
 )
 

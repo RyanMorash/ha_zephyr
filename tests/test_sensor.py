@@ -122,6 +122,17 @@ def test_recirculating_is_read_only_text(value, expected):
     assert _sensor("recirculating", set_recirculating=value).native_value == expected
 
 
+@pytest.mark.parametrize(
+    ("supports_recirculating", "expected"), [(False, False), (True, True)]
+)
+def test_recirculating_is_gated_on_the_capability(supports_recirculating, expected):
+    """`supports_recirculating` exists precisely to gate this sensor."""
+    description = next(d for d in SENSORS if d.key == "recirculating")
+    caps = MagicMock()
+    caps.supports_recirculating = supports_recirculating
+    assert description.exists_fn(caps) is expected
+
+
 def test_sensors_return_none_before_the_first_update():
     coordinator = _coordinator()
     coordinator.data = None

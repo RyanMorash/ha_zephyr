@@ -61,6 +61,12 @@ you have genuinely cleaned yours.
 filter accounting for a filter that may not be installed. Use the vendor app
 if you genuinely need to change it.
 
+**Light is brightness-only, even on hoods that support tunable white.** The
+hood used to build this integration doesn't support TruHue (Zephyr's
+color-temperature feature), so color-temperature control has never been
+validated and isn't implemented. Hoods that do support it will only get
+brightness control until someone with that hardware can verify it.
+
 ## Reporting problems
 
 Download diagnostics from the device page and attach them to your issue. They

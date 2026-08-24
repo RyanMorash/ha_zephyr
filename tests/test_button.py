@@ -13,6 +13,7 @@ def _coordinator():
     caps.mac = "00:00:5e:00:53:00"
     caps.manufacturer = "ZEPHYR"
     caps.urls = {}
+    caps.max_grease_filter_hours = 60
 
     state = MagicMock()
     state.is_online = True
@@ -47,3 +48,21 @@ def test_is_a_config_entity():
 def test_unique_id_is_stable():
     button = ZephyrResetGreaseFilterButton(_coordinator())
     assert button.unique_id.endswith("_reset_grease_filter")
+
+
+async def test_button_is_gated_on_having_a_grease_filter():
+    """A hood with no grease filter must not get a destructive reset
+    button for one. The matching sensor is already gated this way."""
+    from custom_components.zephyr_connect.button import async_setup_entry
+
+    without = _coordinator()
+    without.capabilities.max_grease_filter_hours = 0
+    with_filter = _coordinator()
+    with_filter.capabilities.max_grease_filter_hours = 60
+
+    for coordinator, expected in ((without, 0), (with_filter, 1)):
+        entry = MagicMock()
+        entry.runtime_data = [coordinator]
+        added = []
+        await async_setup_entry(MagicMock(), entry, lambda e: added.extend(e))
+        assert len(added) == expected

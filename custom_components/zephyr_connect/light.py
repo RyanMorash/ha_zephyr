@@ -34,6 +34,12 @@ class ZephyrLight(ZephyrEntity, LightEntity):
     """The hood work light."""
 
     _attr_translation_key = "hood_light"
+    # HoodCapabilities.supports_tru_hue (Zephyr's tunable-white feature) is
+    # deliberately unconsumed here: the reference hood reports
+    # truHueSupport: 0, so a color-temperature implementation would ship
+    # unvalidated. A hood reporting supports_tru_hue = 1 gets
+    # brightness-only control until someone with that hardware can verify
+    # a COLOR_TEMP implementation against it.
     _attr_color_mode = ColorMode.BRIGHTNESS
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 

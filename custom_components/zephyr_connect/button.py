@@ -17,10 +17,11 @@ async def async_setup_entry(
     entry: ZephyrConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the filter reset button for each hood."""
+    """Set up the filter reset button for each hood, gated on capabilities."""
     async_add_entities(
         ZephyrResetGreaseFilterButton(coordinator)
         for coordinator in entry.runtime_data
+        if coordinator.capabilities.max_grease_filter_hours > 0
     )
 
 
