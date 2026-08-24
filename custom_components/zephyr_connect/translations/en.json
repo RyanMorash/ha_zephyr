@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zephyr Connect",
+        "description": "Sign in with the account you use in the Zephyr Connect app.",
+        "data": { "username": "Email", "password": "Password" }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "Your Zephyr Connect password is no longer accepted.",
+        "data": { "password": "Password" }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not reach the Zephyr cloud service.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This account is already set up.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "light": {
+      "hood_light": { "name": "Light" }
+    },
+    "switch": {
+      "power": { "name": "Power" },
+      "clean_air": { "name": "Clean air" }
+    },
+    "number": {
+      "delay_off": { "name": "Delay off" }
+    },
+    "button": {
+      "reset_grease_filter": { "name": "Reset grease filter" }
+    },
+    "sensor": {
+      "grease_filter": { "name": "Grease filter" },
+      "charcoal_filter": { "name": "Charcoal filter" },
+      "fan_runtime": { "name": "Fan runtime" },
+      "light_runtime": { "name": "Light runtime" },
+      "delay_remaining": { "name": "Delay remaining" },
+      "act": { "name": "Airflow Control Technology" },
+      "recirculating": { "name": "Ventilation" }
+    },
+    "binary_sensor": {
+      "grease_filter_due": { "name": "Grease filter" },
+      "charcoal_filter_due": { "name": "Charcoal filter" },
+      "fan_fault": { "name": "Fan" },
+      "fault": { "name": "Fault" }
+    }
+  }
+}

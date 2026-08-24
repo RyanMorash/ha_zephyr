@@ -470,6 +470,9 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except ZephyrError:
                 errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error during Zephyr reauth")
+                errors["base"] = "unknown"
             else:
                 return self.async_update_reload_and_abort(
                     entry, data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]}
@@ -536,6 +539,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+```
+
+- [ ] **Step 9b: Create no-op stubs for the seven platform modules**
+
+`async_forward_entry_setups` imports every platform listed in `PLATFORMS`.
+Those modules are not written until Tasks 4-6, so without stubs any real
+entry setup raises `ModuleNotFoundError` and lands in `SETUP_ERROR` - and
+Task 2's test, which asserts the entry reaches `LOADED`, would fail outright.
+
+Each later task replaces its own stub wholesale.
+
+```bash
+cd /Users/ryanmorash/Developer/ha_zephyr
+for platform in binary_sensor button fan light number sensor switch; do
+  python3 - "$platform" <<'PYEOF'
+import sys, pathlib
+name = sys.argv[1]
+body = '"""' + name + ''' platform for Zephyr Connect.
+
+Placeholder so async_forward_entry_setups can import this platform. The
+real implementation arrives in a later task and replaces this file.
+"""
+
+from __future__ import annotations
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """No entities yet."""
+'''
+pathlib.Path(f"custom_components/zephyr_connect/{name}.py").write_text(body)
+PYEOF
+done
+ls custom_components/zephyr_connect/*.py
 ```
 
 - [ ] **Step 10: Install test dependencies and run**
@@ -1108,7 +1152,7 @@ git commit -m "feat: add entity base with device info and availability"
 The two controls people touch daily. Both write only their own level — the device raises `power` itself, so writing `power` alongside would be redundant and could fight the device.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/fan.py`, `custom_components/zephyr_connect/light.py`
+- Replace (these exist as no-op stubs from Task 1): `custom_components/zephyr_connect/fan.py`, `custom_components/zephyr_connect/light.py`
 - Test: `tests/test_fan.py`, `tests/test_light.py`
 
 **Interfaces:**
@@ -1167,7 +1211,7 @@ def test_max_speed_reports_one_hundred_percent():
     assert ZephyrFan(_coordinator(fan=6)).is_on is True
 
 
-@pytest.mark.parametrize(("speed", "expected"), [(1, 17), (3, 50), (5, 83)])
+@pytest.mark.parametrize(("speed", "expected"), [(1, 16), (3, 50), (5, 83)])
 def test_intermediate_speeds_map_to_percentages(speed, expected):
     assert ZephyrFan(_coordinator(fan=speed)).percentage == expected
 
@@ -1398,9 +1442,11 @@ def test_off_state():
 
 def test_max_level_is_full_brightness():
     assert ZephyrLight(_coordinator(light=3)).brightness == 255
+    # HA scales by FLOOR division, so levels 1 and 2 give 84 and 168,
+    # not the 85/170 exact division would suggest.
 
 
-@pytest.mark.parametrize(("level", "expected"), [(1, 85), (2, 170), (3, 255)])
+@pytest.mark.parametrize(("level", "expected"), [(1, 84), (2, 168), (3, 255)])
 def test_levels_map_to_brightness(level, expected):
     assert ZephyrLight(_coordinator(light=level)).brightness == expected
 
@@ -1539,7 +1585,7 @@ git commit -m "feat: add fan and light platforms"
 Every control here **actuates the hood** rather than storing a preference — validated behaviour, not an assumption. The delay-off number in particular starts the fan when written, which its description must say plainly.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/switch.py`, `number.py`, `button.py`
+- Replace (no-op stubs from Task 1): `custom_components/zephyr_connect/switch.py`, `number.py`, `button.py`
 - Test: `tests/test_switch.py`, `tests/test_number.py`, `tests/test_button.py`
 
 **Interfaces:**
@@ -2016,7 +2062,7 @@ git commit -m "feat: add switch, number and button platforms"
 The filter-life sensor carries the formula verified against the vendor app's 82%. Get its unit conversion wrong and every user sees a wrong number.
 
 **Files:**
-- Create: `custom_components/zephyr_connect/sensor.py`, `binary_sensor.py`
+- Replace (no-op stubs from Task 1): `custom_components/zephyr_connect/sensor.py`, `binary_sensor.py`
 - Test: `tests/test_sensor.py`, `tests/test_binary_sensor.py`
 
 **Interfaces:**
