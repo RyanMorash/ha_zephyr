@@ -227,9 +227,17 @@ async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> Non
 async def test_partial_setup_failure_leaves_no_orphan_timers(
     hass, entry, mock_client
 ) -> None:
-    """If a later hood fails to initialise, earlier coordinators must be
-    shut down. Each initialised coordinator arms HA's periodic timer, so a
-    leaked one keeps firing forever against a stopped client."""
+    """Verify that after a partially-failed setup, nothing continues polling.
+
+    This property holds via two independent mechanisms. First, our explicit
+    _release() helper shuts down already-initialised coordinators before
+    stopping the shared client. Second, Home Assistant's DataUpdateCoordinator
+    base class registers config_entry.async_on_unload(self.async_shutdown),
+    which HA invokes on any failed setup. As a result, this test does not
+    regress if _release() is removed — coordinators are cleaned up by HA
+    regardless. The test is therefore a property guard (nothing polls after
+    abandoned setup) rather than a regression guard for the _release() helper
+    specifically."""
     first, second = _caps(), _caps()
     second.thing_name = "bbbbbbbbccccccccddddddddeeeeeeeeffffffff"
     mock_client.async_setup = AsyncMock(return_value=[first, second])

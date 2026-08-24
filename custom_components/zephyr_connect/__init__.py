@@ -48,7 +48,15 @@ async def _release(
     timer (see the no-op listener in ZephyrCoordinator.async_initialise), so
     shutting them down is not optional - a leaked coordinator keeps firing
     against a stopped client, and setup retries would accumulate more.
-    """
+
+    Note: Home Assistant's DataUpdateCoordinator base class registers
+    config_entry.async_on_unload(self.async_shutdown) during __init__, so HA
+    will shut down coordinators automatically on any failed setup, meaning
+    they would be cleaned up regardless. We still do it explicitly here because
+    relying on a base-class implementation detail is fragile. More importantly,
+    calling async_shutdown directly here guarantees coordinators are shut down
+    BEFORE the shared client is stopped, which HA's async_on_unload ordering
+    does not promise."""
     for coordinator in coordinators:
         await coordinator.async_shutdown()
     await client.async_stop()
