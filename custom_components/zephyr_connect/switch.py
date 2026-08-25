@@ -42,14 +42,17 @@ class ZephyrPowerSwitch(ZephyrEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        state = self.hood
-        return None if state is None else bool(state.power)
+        state = self.hood_state
+        if state is None or state.power is None:
+            # Unknown, not off - the device did not report the field.
+            return None
+        return bool(state.power)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"power": 1})
+        await self._async_write(self.coordinator.hood.async_set_power(True))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"power": 0})
+        await self._async_write(self.coordinator.hood.async_set_power(False))
 
 
 class ZephyrCleanAirSwitch(ZephyrEntity, SwitchEntity):
@@ -67,11 +70,13 @@ class ZephyrCleanAirSwitch(ZephyrEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        state = self.hood
-        return None if state is None else bool(state.set_clean_air_function)
+        state = self.hood_state
+        if state is None or state.set_clean_air_function is None:
+            return None
+        return bool(state.set_clean_air_function)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"setcleanairfunction": 1})
+        await self._async_write(self.coordinator.hood.async_set_clean_air(True))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"setcleanairfunction": 0})
+        await self._async_write(self.coordinator.hood.async_set_clean_air(False))

@@ -17,11 +17,11 @@ Add this repository as a HACS custom repository, install **Zephyr Connect**,
 restart Home Assistant, then add the integration and sign in with the account
 you use in the Zephyr Connect app.
 
-> **Note:** this integration currently installs its `pyzephyrconnect` library
-> directly from GitHub rather than from PyPI. A PyPI release is pending; once
-> it ships, `manifest.json` will be updated to pin a released version. Until
-> then, installing the integration will also pull `pyzephyrconnect` from
-> `github.com/RyanMorash/pyzephyrconnect`.
+The integration installs its
+[pyzephyrconnect](https://pypi.org/project/pyzephyrconnect/) library from
+PyPI. Signing in runs a full login once; afterwards the integration stores
+the session tokens in the config entry so restarts reconnect without
+re-authenticating.
 
 ## Entities
 
@@ -31,7 +31,7 @@ you use in the Zephyr Connect app.
 | Light | Brightness gated on `maxLightLevel` |
 | Power switch | Off stops everything; on restores the previous levels |
 | Clean air switch | **Starts the fan at speed 1** when enabled |
-| Delay off | Minutes in the UI (seconds on the device). **Setting a value starts the fan at speed 1** |
+| Delay off | Raw device value, no unit — see below. **Setting a value starts the fan at speed 1** |
 | Reset grease filter | Zeroes the usage counter — see below |
 | Grease / charcoal filter | Percentage of life remaining |
 | Fan / light runtime | Diagnostic, disabled by default |
@@ -52,10 +52,13 @@ this integration.
 everything; turning it back on restores the fan and light to the levels they
 were running at before, rather than starting fresh.
 
-**Delay off is minutes in Home Assistant, seconds on the device.** The
-integration converts for you. The vendor app only offers 5 or 10 minutes, but
-the device itself accepts arbitrary values, so this integration exposes a
-free-entry number instead of just those two presets.
+**Delay off has no unit yet.** Whether the device reads the field as seconds
+or minutes has not been validated against hardware (the vendor app writes 300
+for its "5 minutes" preset, which suggests seconds, but the countdown has
+never been watched). Until that validation runs, the entity shows and writes
+the device's raw value with no unit — presenting one would be a guess dressed
+up as a fact. The vendor app only offers two presets, but the device accepts
+arbitrary values, so this integration exposes a free-entry number.
 
 **Reset grease filter is destructive and untested.** It zeroes a counter that
 cannot be reconstructed, and the write has never been validated against
@@ -75,8 +78,8 @@ brightness control until someone with that hardware can verify it.
 ## Reporting problems
 
 Download diagnostics from the device page and attach them to your issue. They
-are redacted — no serial, MAC, thing name or coordinates — which is what
-makes them safe to attach to a public issue. If you have a model we have not
+are redacted — no serial, MAC, thing name, coordinates, credentials or
+session tokens — which is what makes them safe to attach to a public issue. If you have a model we have not
 seen, that download is what lets support for it get added.
 
 ## License

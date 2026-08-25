@@ -24,7 +24,7 @@ from .entity import ZephyrEntity
 MINUTES_PER_HOUR = 60
 
 
-def _filter_remaining(used_minutes: int, life_hours: int) -> float | None:
+def _filter_remaining(used_minutes: int, life_hours: int | None) -> float | None:
     """Percentage of filter life left.
 
     Verified against the vendor app: 643 minutes against a 60-hour life
@@ -32,8 +32,12 @@ def _filter_remaining(used_minutes: int, life_hours: int) -> float | None:
 
     The counter is in MINUTES and the capability maximum is in HOURS - a
     mismatch that is easy to miss and wrong by 60x if conflated.
+
+    life_hours is None when the model does not advertise a filter life.
+    The exists_fn gates already keep such hoods from getting this sensor,
+    but comparing None would raise TypeError, so guard here too.
     """
-    if life_hours <= 0:
+    if life_hours is None or life_hours <= 0:
         return None
     used_fraction = used_minutes / (life_hours * MINUTES_PER_HOUR)
     # Clamp: past end-of-life the raw value goes negative.
@@ -64,7 +68,9 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
             "store_url": caps.urls.get("GreaseFilterWebstoreURL"),
             "video_url": caps.urls.get("GreaseFilterVideoURL"),
         },
-        exists_fn=lambda caps: caps.max_grease_filter_hours > 0,
+        # None means the model does not advertise a filter life - no sensor,
+        # same as an advertised 0.
+        exists_fn=lambda caps: (caps.max_grease_filter_hours or 0) > 0,
     ),
     ZephyrSensorDescription(
         key="charcoal_filter",
@@ -80,7 +86,7 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
             "store_url": caps.urls.get("CharcoalFilterWebstoreURL"),
             "video_url": caps.urls.get("CharcoalFilterVideoURL"),
         },
-        exists_fn=lambda caps: caps.max_charcoal_filter_hours > 0,
+        exists_fn=lambda caps: (caps.max_charcoal_filter_hours or 0) > 0,
     ),
     ZephyrSensorDescription(
         key="fan_runtime",
@@ -105,8 +111,13 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
     ZephyrSensorDescription(
         key="delay_remaining",
         translation_key="delay_remaining",
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-        device_class=SensorDeviceClass.DURATION,
+        # Deliberately unitless, like the delay-off number: whether the
+        # timer fields hold seconds or minutes is an open
+        # hardware-validation question (the library's VALIDATION.md,
+        # question 2), and a duration device class needs a unit. The raw
+        # countdown value still shows the timer running and reaching zero.
+        # delay_timer is None when unreported, which a sensor shows as
+        # unknown - exactly right.
         value_fn=lambda state, _caps: state.delay_timer,
     ),
     ZephyrSensorDescription(
@@ -118,6 +129,7 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         # settable from the cloud, so this is strictly a readout - but a
         # meaningful one, since ACT being enabled explains why the hood's
         # airflow is limited. Enabled by default for that reason.
+        # `or None` folds both None (unreported) and "" into unknown.
         value_fn=lambda state, _caps: state.act or None,
     ),
     ZephyrSensorDescription(
@@ -125,9 +137,13 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         translation_key="recirculating",
         entity_category=EntityCategory.DIAGNOSTIC,
         # Read-only by design: writing it would begin charcoal-filter
-        # accounting for a filter that may not be installed.
+        # accounting for a filter that may not be installed. None means the
+        # device did not report the field - unknown, NOT "ducted": ducted
+        # is a positive claim about how the hood is installed.
         value_fn=lambda state, _caps: (
-            "recirculating" if state.set_recirculating else "ducted"
+            None
+            if state.set_recirculating is None
+            else ("recirculating" if state.set_recirculating else "ducted")
         ),
         exists_fn=lambda caps: caps.supports_recirculating,
     ),
@@ -161,14 +177,14 @@ class ZephyrSensor(ZephyrEntity, SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        state = self.hood
+        state = self.hood_state
         if state is None:
             return None
         return self.entity_description.value_fn(state, self.coordinator.capabilities)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        state = self.hood
+        state = self.hood_state
         if state is None or self.entity_description.attributes_fn is None:
             return None
         attrs = self.entity_description.attributes_fn(

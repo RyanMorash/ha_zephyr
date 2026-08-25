@@ -17,11 +17,15 @@ async def async_setup_entry(
     entry: ZephyrConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the filter reset button for each hood, gated on capabilities."""
+    """Set up the filter reset button for each hood, gated on capabilities.
+
+    max_grease_filter_hours is None when the model does not advertise one -
+    absent means "not advertised", so no button, same as an advertised 0.
+    """
     async_add_entities(
         ZephyrResetGreaseFilterButton(coordinator)
         for coordinator in entry.runtime_data
-        if coordinator.capabilities.max_grease_filter_hours > 0
+        if (coordinator.capabilities.max_grease_filter_hours or 0) > 0
     )
 
 
@@ -42,4 +46,4 @@ class ZephyrResetGreaseFilterButton(ZephyrEntity, ButtonEntity):
         super().__init__(coordinator, "reset_grease_filter")
 
     async def async_press(self) -> None:
-        await self.coordinator.async_set_state({"resetgreasefilter": 1})
+        await self._async_write(self.coordinator.hood.async_reset_grease_filter())

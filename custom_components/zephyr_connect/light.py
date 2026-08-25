@@ -22,11 +22,15 @@ async def async_setup_entry(
     entry: ZephyrConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one light per hood that has one."""
+    """Set up one light per hood that has one.
+
+    max_light_level is None when the model does not advertise one - absent
+    means "not advertised", so no light entity, same as an advertised 0.
+    """
     async_add_entities(
         ZephyrLight(coordinator)
         for coordinator in entry.runtime_data
-        if coordinator.capabilities.max_light_level > 0
+        if (coordinator.capabilities.max_light_level or 0) > 0
     )
 
 
@@ -45,17 +49,22 @@ class ZephyrLight(ZephyrEntity, LightEntity):
 
     def __init__(self, coordinator: ZephyrCoordinator) -> None:
         super().__init__(coordinator, "light")
-        self._range = (1, coordinator.capabilities.max_light_level)
+        # The setup gate guarantees a positive maximum; `or 1` only narrows
+        # the type for the checker.
+        self._range = (1, coordinator.capabilities.max_light_level or 1)
 
     @property
     def is_on(self) -> bool | None:
-        state = self.hood
-        return None if state is None else bool(state.light)
+        state = self.hood_state
+        if state is None or state.light is None:
+            # Unknown, not off - the device did not report the field.
+            return None
+        return bool(state.light)
 
     @property
     def brightness(self) -> int | None:
-        state = self.hood
-        if state is None:
+        state = self.hood_state
+        if state is None or state.light is None:
             return None
         if not state.light:
             return 0
@@ -72,7 +81,7 @@ class ZephyrLight(ZephyrEntity, LightEntity):
             level = round(percentage_to_ranged_value(self._range, percent))
             # Never round down to 0: turn_on must always produce light.
             level = max(1, min(level, self._range[1]))
-        await self.coordinator.async_set_state({"light": level})
+        await self._async_write(self.coordinator.hood.async_set_light(level))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"light": 0})
+        await self._async_write(self.coordinator.hood.async_set_light(0))

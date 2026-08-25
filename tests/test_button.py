@@ -18,21 +18,22 @@ def _coordinator():
     state = MagicMock()
     state.is_online = True
 
+    hood = MagicMock()
+    hood.async_reset_grease_filter = AsyncMock()
+
     coordinator = MagicMock()
     coordinator.capabilities = caps
     coordinator.thing_name = caps.thing_name
     coordinator.data = state
     coordinator.last_update_success = True
-    coordinator.async_set_state = AsyncMock()
+    coordinator.hood = hood
     return coordinator
 
 
-async def test_press_writes_the_reset_flag():
+async def test_press_resets_the_counter():
     coordinator = _coordinator()
     await ZephyrResetGreaseFilterButton(coordinator).async_press()
-    coordinator.async_set_state.assert_awaited_once_with(
-        {"resetgreasefilter": 1}
-    )
+    coordinator.hood.async_reset_grease_filter.assert_awaited_once_with()
 
 
 def test_is_a_config_entity():
@@ -52,15 +53,13 @@ def test_unique_id_is_stable():
 
 async def test_button_is_gated_on_having_a_grease_filter():
     """A hood with no grease filter must not get a destructive reset
-    button for one. The matching sensor is already gated this way."""
+    button for one. None means the model does not advertise a filter life -
+    same as 0. The matching sensor is already gated this way."""
     from custom_components.zephyr_connect.button import async_setup_entry
 
-    without = _coordinator()
-    without.capabilities.max_grease_filter_hours = 0
-    with_filter = _coordinator()
-    with_filter.capabilities.max_grease_filter_hours = 60
-
-    for coordinator, expected in ((without, 0), (with_filter, 1)):
+    for hours, expected in ((None, 0), (0, 0), (60, 1)):
+        coordinator = _coordinator()
+        coordinator.capabilities.max_grease_filter_hours = hours
         entry = MagicMock()
         entry.runtime_data = [coordinator]
         added = []

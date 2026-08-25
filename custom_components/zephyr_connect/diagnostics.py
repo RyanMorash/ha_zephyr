@@ -18,10 +18,30 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from . import ZephyrConfigEntry
+from .const import CONF_TOKENS
 
 # Identifies a specific home and its owner. `location` carries precise
 # coordinates from the vendor's device list.
-REDACT_KEYS = {"thingName", "SN", "MAC", "location", CONF_USERNAME, CONF_PASSWORD}
+#
+# CONF_TOKENS names the persisted ZephyrTokens record in entry.data;
+# async_redact_data matches key names at every depth, so naming the
+# container redacts the whole sub-dict. id_token and refresh_token are
+# named individually too, in case they ever appear outside it - a Cognito
+# refresh token is valid for ~30 days and on its own is sufficient to take
+# over the account. identity_id is not a credential, but it is a stable
+# account identifier in the same category as a serial number.
+REDACT_KEYS = {
+    "thingName",
+    "SN",
+    "MAC",
+    "location",
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    CONF_TOKENS,
+    "id_token",
+    "refresh_token",
+    "identity_id",
+}
 
 
 async def async_get_config_entry_diagnostics(
@@ -43,7 +63,9 @@ async def async_get_config_entry_diagnostics(
                 "state": async_redact_data(
                     dict(state.raw) if state is not None else {}, REDACT_KEYS
                 ),
-                "connected": coordinator.client.connected,
+                # Per-hood: on a multi-hood account one connection dropping
+                # must not report the others as down.
+                "connected": coordinator.hood.connected,
                 "last_update_success": coordinator.last_update_success,
             }
         )

@@ -13,18 +13,27 @@ from pytest_homeassistant_custom_component.common import (
 from homeassistant.util import dt as dt_util
 
 from custom_components.zephyr_connect.const import (
+    CONF_TOKENS,
     DEGRADED_POLL_INTERVAL_SECONDS,
     DOMAIN,
 )
 from custom_components.zephyr_connect.coordinator import SAFETY_NET_TICKS
-from pyzephyrconnect import ZephyrAuthError, ZephyrError
+from pyzephyrconnect import ZephyrAuthError, ZephyrError, ZephyrTokens
 
 THING = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
 
+TOKENS_RECORD = {
+    "username": "user@example.com",
+    "id_token": "eyJr.id.token",
+    "refresh_token": "eyJr.refresh.token",
+    "identity_id": "us-west-2:00000000-1111-2222-3333-444455556666",
+    "expires_at": 4_000_000_000.0,
+}
 
-def _caps():
+
+def _caps(thing_name=THING):
     caps = MagicMock()
-    caps.thing_name = THING
+    caps.thing_name = thing_name
     caps.model = "AK7400AS"
     caps.serial = "1234567XYZ"
     caps.mac = "00:00:5e:00:53:00"
@@ -42,28 +51,59 @@ def _state(**overrides):
     state = MagicMock()
     defaults = {
         "power": 0, "fan": 0, "light": 0, "is_online": True,
-        "use_grease_filter_time": 643, "delay_timer": 0,
+        "use_grease_filter_time": 643, "use_charcoal_filter_time": 0,
+        "use_fan_time": 1979, "use_light_time": 2833,
+        "delay_timer": 0, "set_delay_timer": 0,
+        "act": "Disabled", "set_recirculating": 0,
+        "set_clean_air_function": 0,
+        "clean_grease_filters": 0, "clean_charcoal_filters": 0,
+        "alarm_grease_filter": 0, "alarm_fan": 0, "fan_warning": 0,
+        "alarm_fault_code": 0, "fault_codes": (),
     }
     for key, value in {**defaults, **overrides}.items():
         setattr(state, key, value)
     return state
 
 
+def _hood(thing_name=THING):
+    """A Hood mock: per-thing lifecycle, state and controls live here now."""
+    hood = MagicMock()
+    hood.capabilities = _caps(thing_name)
+    hood.thing_name = thing_name
+    hood.state = _state()
+    hood.connected = True
+    hood.async_start = AsyncMock()
+    hood.async_stop = AsyncMock()
+    hood.async_poll = AsyncMock(return_value=_state())
+    hood.add_listener = MagicMock(return_value=lambda: None)
+    return hood
+
+
 @pytest.fixture
 def mock_client():
+    """A ZephyrClient built through from_credentials, returning one Hood.
+
+    The per-thing client methods (async_start, async_poll, state,
+    add_listener, async_set_state, async_refresh_if_needed) are DELETED
+    from the mock, mirroring the 0.1.0 surface: any leftover call site
+    raises AttributeError here instead of silently passing against a
+    MagicMock and failing only in production.
+    """
     client = MagicMock()
-    client.async_setup = AsyncMock(return_value=[_caps()])
-    client.async_start = AsyncMock()
+    client.async_setup = AsyncMock(return_value=[_hood()])
     client.async_stop = AsyncMock()
-    client.async_poll = AsyncMock(return_value=_state())
-    client.async_refresh_if_needed = AsyncMock(return_value=False)
-    client.async_set_state = AsyncMock()
-    client.state = MagicMock(return_value=_state())
-    client.add_listener = MagicMock(return_value=lambda: None)
     client.connected = True
+    del client.async_start
+    del client.async_poll
+    del client.state
+    del client.add_listener
+    del client.async_set_state
+    del client.async_refresh_if_needed
     with patch(
-        "custom_components.zephyr_connect.ZephyrClient", return_value=client
-    ):
+        "custom_components.zephyr_connect.ZephyrClient"
+    ) as client_cls:
+        client_cls.from_credentials.return_value = client
+        client.mock_from_credentials = client_cls.from_credentials
         yield client
 
 
@@ -78,13 +118,18 @@ def entry(hass: HomeAssistant) -> MockConfigEntry:
     return e
 
 
+def _the_hood(mock_client):
+    """The single Hood the default mock_client returns."""
+    return mock_client.async_setup.return_value[0]
+
+
 async def test_setup_starts_each_hood(hass, entry, mock_client) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
     mock_client.async_setup.assert_awaited_once()
-    mock_client.async_start.assert_awaited_once_with(THING)
+    _the_hood(mock_client).async_start.assert_awaited_once_with()
 
 
 async def test_setup_registers_a_push_listener(hass, entry, mock_client) -> None:
@@ -92,8 +137,81 @@ async def test_setup_registers_a_push_listener(hass, entry, mock_client) -> None
     would be silently poll-only."""
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.add_listener.assert_called_once()
-    assert mock_client.add_listener.call_args.args[0] == THING
+    _the_hood(mock_client).add_listener.assert_called_once()
+
+
+async def test_setup_without_saved_tokens_passes_none(
+    hass, entry, mock_client
+) -> None:
+    """A fresh entry has no token record; the library then runs a full SRP
+    login rather than being handed a fabricated one."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    kwargs = mock_client.mock_from_credentials.call_args.kwargs
+    assert kwargs["tokens"] is None
+    assert kwargs["token_updater"] is not None
+
+
+async def test_setup_restores_saved_tokens(hass, mock_client) -> None:
+    """A persisted record must reach the library as a ZephyrTokens, so a
+    restart skips the rate-limited SRP login."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "username": "user@example.com",
+            "password": "hunter2",
+            CONF_TOKENS: TOKENS_RECORD,
+        },
+        unique_id="us-west-2:00000000-1111-2222-3333-444455556666",
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    tokens = mock_client.mock_from_credentials.call_args.kwargs["tokens"]
+    assert isinstance(tokens, ZephyrTokens)
+    assert tokens.as_dict() == TOKENS_RECORD
+
+
+async def test_corrupt_saved_tokens_fall_back_to_fresh_login(
+    hass, mock_client
+) -> None:
+    """ZephyrTokens.from_dict raises ZephyrDataError on a malformed record.
+    The correct response is to discard it and log in fresh - NOT to abort
+    setup: a corrupted value that survives fails much later and far away,
+    as a SECRET_HASH Cognito rejects or an MQTT client ID AWS IoT silently
+    drops messages for."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "username": "user@example.com",
+            "password": "hunter2",
+            CONF_TOKENS: {"username": "", "id_token": 42},
+        },
+        unique_id="us-west-2:00000000-1111-2222-3333-444455556666",
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert mock_client.mock_from_credentials.call_args.kwargs["tokens"] is None
+
+
+async def test_refreshed_tokens_are_persisted(hass, entry, mock_client) -> None:
+    """The token_updater must write each refresh into the config entry, or
+    a restart is back to a full SRP login."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    updater = mock_client.mock_from_credentials.call_args.kwargs["token_updater"]
+    updater(ZephyrTokens.from_dict(TOKENS_RECORD))
+    await hass.async_block_till_done()
+
+    assert entry.data[CONF_TOKENS] == TOKENS_RECORD
 
 
 async def test_auth_failure_triggers_reauth(hass, entry, mock_client) -> None:
@@ -107,11 +225,11 @@ async def test_auth_failure_during_hood_init_triggers_reauth(
     hass, entry, mock_client
 ) -> None:
     """ZephyrAuthError subclasses ZephyrError. An auth failure raised from
-    inside the per-hood loop (via async_start(), called by
+    inside the per-hood loop (via hood.async_start(), called by
     coordinator.async_initialise()) must still surface as ConfigEntryAuthFailed
     and land in SETUP_ERROR, not be caught by the broader ZephyrError clause
     and downgraded to a perpetual SETUP_RETRY."""
-    mock_client.async_start.side_effect = ZephyrAuthError("expired")
+    _the_hood(mock_client).async_start.side_effect = ZephyrAuthError("expired")
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
@@ -142,7 +260,7 @@ async def test_unload_stops_client_with_no_hoods(hass, entry, mock_client) -> No
     """The shared client is stored directly on runtime_data, not reached via
     runtime_data[0].client, so it must still be stopped when the account has
     zero hoods and coordinators is empty."""
-    mock_client.async_setup.return_value = []
+    mock_client.async_setup = AsyncMock(return_value=[])
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -158,31 +276,67 @@ async def test_degraded_poll_runs_when_mqtt_is_down(hass, entry, mock_client) ->
     degrade to slower updates rather than going unavailable."""
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.async_poll.reset_mock()
+    hood = _the_hood(mock_client)
+    hood.async_poll.reset_mock()
 
-    mock_client.connected = False
+    hood.connected = False
     async_fire_time_changed(
         hass,
         dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
     )
     await hass.async_block_till_done()
 
-    mock_client.async_poll.assert_awaited()
+    hood.async_poll.assert_awaited()
 
 
-async def test_refresh_is_attempted_on_the_update_tick(hass, entry, mock_client) -> None:
-    """Credentials expire hourly; the library no-ops until inside its margin."""
+async def test_degraded_poll_uses_this_hoods_connection(
+    hass, entry, mock_client
+) -> None:
+    """client.connected is an aggregate now - True while ANY hood is up. On
+    a multi-hood account the coordinator must key the degraded fallback on
+    its own hood's connection, or one healthy hood masks another's outage."""
+    healthy, broken = _hood(), _hood("bbbbbbbbccccccccddddddddeeeeeeeeffffffff")
+    mock_client.async_setup = AsyncMock(return_value=[healthy, broken])
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.async_refresh_if_needed.reset_mock()
+    healthy.async_poll.reset_mock()
+    broken.async_poll.reset_mock()
 
+    broken.connected = False  # client.connected would still read True
     async_fire_time_changed(
         hass,
         dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
     )
     await hass.async_block_till_done()
 
-    mock_client.async_refresh_if_needed.assert_awaited()
+    broken.async_poll.assert_awaited()
+    healthy.async_poll.assert_not_awaited()
+
+
+async def test_terminal_supervisor_failure_reaches_reauth_via_poll(
+    hass, entry, mock_client
+) -> None:
+    """A terminal credential failure inside the library's supervisor stops
+    it, disconnects the hoods, and re-raises from the next hood.async_poll().
+    The coordinator's periodic tick is what delivers that poll, so the
+    failure must land as a reauth prompt (SETUP_ERROR after reload), not be
+    swallowed as a routine UpdateFailed."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+
+    hood.connected = False  # the supervisor disconnected the hoods
+    hood.async_poll.side_effect = ZephyrAuthError("refresh token revoked")
+    async_fire_time_changed(
+        hass,
+        dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
+    )
+    await hass.async_block_till_done()
+
+    assert any(
+        flow["context"]["source"] == "reauth"
+        for flow in hass.config_entries.flow.async_progress()
+    )
 
 
 async def test_safety_net_does_not_poll_before_threshold(
@@ -192,7 +346,8 @@ async def test_safety_net_does_not_poll_before_threshold(
     safety-net cadence - no real poll should happen yet."""
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.async_poll.reset_mock()
+    hood = _the_hood(mock_client)
+    hood.async_poll.reset_mock()
 
     now = dt_util.utcnow()
     for i in range(1, SAFETY_NET_TICKS):
@@ -202,7 +357,7 @@ async def test_safety_net_does_not_poll_before_threshold(
         )
         await hass.async_block_till_done()
 
-    mock_client.async_poll.assert_not_awaited()
+    hood.async_poll.assert_not_awaited()
 
 
 async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> None:
@@ -211,7 +366,8 @@ async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> Non
     caught even though the connection never dropped."""
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.async_poll.reset_mock()
+    hood = _the_hood(mock_client)
+    hood.async_poll.reset_mock()
 
     now = dt_util.utcnow()
     for i in range(1, SAFETY_NET_TICKS + 1):
@@ -221,7 +377,7 @@ async def test_safety_net_polls_after_threshold(hass, entry, mock_client) -> Non
         )
         await hass.async_block_till_done()
 
-    mock_client.async_poll.assert_awaited_once_with(THING)
+    hood.async_poll.assert_awaited_once_with()
 
 
 async def test_partial_setup_failure_leaves_no_orphan_timers(
@@ -238,30 +394,28 @@ async def test_partial_setup_failure_leaves_no_orphan_timers(
     regardless. The test is therefore a property guard (nothing polls after
     abandoned setup) rather than a regression guard for the _release() helper
     specifically."""
-    first, second = _caps(), _caps()
-    second.thing_name = "bbbbbbbbccccccccddddddddeeeeeeeeffffffff"
+    first, second = _hood(), _hood("bbbbbbbbccccccccddddddddeeeeeeeeffffffff")
     mock_client.async_setup = AsyncMock(return_value=[first, second])
 
     # First hood starts fine; the second fails.
-    mock_client.async_start = AsyncMock(
-        side_effect=[None, ZephyrError("hood 2 unreachable")]
-    )
+    second.async_start.side_effect = ZephyrError("hood 2 unreachable")
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
     # Nothing should still be polling on behalf of the abandoned setup.
-    mock_client.async_refresh_if_needed.reset_mock()
-    mock_client.async_poll.reset_mock()
+    first.async_poll.reset_mock()
+    second.async_poll.reset_mock()
+    first.connected = False  # a disconnected tick would poll every time
     async_fire_time_changed(
         hass,
         dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
     )
     await hass.async_block_till_done()
 
-    mock_client.async_refresh_if_needed.assert_not_awaited()
-    mock_client.async_poll.assert_not_awaited()
+    first.async_poll.assert_not_awaited()
+    second.async_poll.assert_not_awaited()
 
 
 async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
@@ -269,8 +423,9 @@ async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
     cadence used while connected."""
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    mock_client.async_poll.reset_mock()
-    mock_client.connected = False
+    hood = _the_hood(mock_client)
+    hood.async_poll.reset_mock()
+    hood.connected = False
 
     now = dt_util.utcnow()
     for i in range(1, 4):
@@ -280,4 +435,4 @@ async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
         )
         await hass.async_block_till_done()
 
-    assert mock_client.async_poll.await_count == 3
+    assert hood.async_poll.await_count == 3
