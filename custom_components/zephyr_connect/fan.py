@@ -23,11 +23,16 @@ async def async_setup_entry(
     entry: ZephyrConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one fan per hood."""
+    """Set up one fan per hood.
+
+    max_fan_speed is None when the model does not advertise one - absent
+    means "not advertised", so no fan entity, same as an advertised 0. The
+    percentage mapping below needs a real range to be meaningful.
+    """
     async_add_entities(
         ZephyrFan(coordinator)
         for coordinator in entry.runtime_data
-        if coordinator.capabilities.max_fan_speed > 0
+        if (coordinator.capabilities.max_fan_speed or 0) > 0
     )
 
 
@@ -43,7 +48,9 @@ class ZephyrFan(ZephyrEntity, FanEntity):
 
     def __init__(self, coordinator: ZephyrCoordinator) -> None:
         super().__init__(coordinator, "fan")
-        self._range = (1, coordinator.capabilities.max_fan_speed)
+        # The setup gate guarantees a positive maximum; `or 1` only narrows
+        # the type for the checker.
+        self._range = (1, coordinator.capabilities.max_fan_speed or 1)
 
     @property
     def speed_count(self) -> int:
@@ -51,8 +58,10 @@ class ZephyrFan(ZephyrEntity, FanEntity):
 
     @property
     def percentage(self) -> int | None:
-        state = self.hood
-        if state is None:
+        state = self.hood_state
+        if state is None or state.fan is None:
+            # None means the device did not report the field - unknown, not
+            # off. bool(None) would silently read as 0%.
             return None
         if not state.fan:
             return 0
@@ -60,8 +69,10 @@ class ZephyrFan(ZephyrEntity, FanEntity):
 
     @property
     def is_on(self) -> bool | None:
-        state = self.hood
-        return None if state is None else bool(state.fan)
+        state = self.hood_state
+        if state is None or state.fan is None:
+            return None
+        return bool(state.fan)
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Write the fan level only.
@@ -70,11 +81,11 @@ class ZephyrFan(ZephyrEntity, FanEntity):
         writing power here would be redundant and could fight it.
         """
         if percentage == 0:
-            await self.coordinator.async_set_state({"fan": 0})
+            await self._async_write(self.coordinator.hood.async_set_fan(0))
             return
         speed = round(percentage_to_ranged_value(self._range, percentage))
         speed = max(1, min(speed, self._range[1]))
-        await self.coordinator.async_set_state({"fan": speed})
+        await self._async_write(self.coordinator.hood.async_set_fan(speed))
 
     async def async_turn_on(
         self,
@@ -90,4 +101,4 @@ class ZephyrFan(ZephyrEntity, FanEntity):
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_state({"fan": 0})
+        await self._async_write(self.coordinator.hood.async_set_fan(0))

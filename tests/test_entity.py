@@ -1,9 +1,13 @@
 """Entity base behaviour: identity, device registration, availability."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.zephyr_connect.const import DOMAIN
 from custom_components.zephyr_connect.entity import ZephyrEntity
+from pyzephyrconnect import ZephyrNotConnectedError, ZephyrWriteError
 
 THING = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
 
@@ -55,6 +59,16 @@ def test_unavailable_when_the_hood_is_offline():
     assert ZephyrEntity(_coordinator(is_online=False), "fan").available is False
 
 
+def test_available_when_online_status_is_unreported():
+    """is_online is None when the latest state came from a payload that did
+    not carry it: a full shadow document replaces the cache wholesale, and
+    not every reported block includes isOnline. A hood that just pushed a
+    shadow document is plainly reachable, so None must mean 'no news', not
+    'offline' - otherwise entities would flap unavailable after every full
+    shadow read."""
+    assert ZephyrEntity(_coordinator(is_online=None), "fan").available is True
+
+
 def test_unavailable_when_updates_are_failing():
     assert ZephyrEntity(
         _coordinator(last_update_success=False), "fan"
@@ -70,3 +84,29 @@ def test_unavailable_before_the_first_update():
     coordinator.data = None
     coordinator.state = None
     assert ZephyrEntity(coordinator, "fan").available is False
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ZephyrNotConnectedError("hood is not connected"),
+        ZephyrWriteError("fan must be between 0 and 6 on this hood, got 9"),
+    ],
+)
+async def test_write_helper_maps_library_errors_to_ha(error):
+    """Every ZephyrError from a control call - including
+    ZephyrNotConnectedError, which used to be a bare RuntimeError in the
+    old library - must surface as HomeAssistantError so service calls fail
+    visibly in the UI instead of leaking a library type."""
+    entity = ZephyrEntity(_coordinator(), "fan")
+    request = AsyncMock(side_effect=error)
+
+    with pytest.raises(HomeAssistantError):
+        await entity._async_write(request())
+
+
+async def test_write_helper_passes_success_through():
+    entity = ZephyrEntity(_coordinator(), "fan")
+    request = AsyncMock()
+    await entity._async_write(request())
+    request.assert_awaited_once()

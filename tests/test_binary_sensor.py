@@ -61,11 +61,27 @@ def test_grease_filter_due_is_on():
     assert _sensor("grease_filter_due", clean_grease_filters=1).is_on is True
 
 
+def test_unreported_flags_are_unknown_not_clear():
+    """None means the device did not report the field. bool(None) is False,
+    so a naive bool() would silently report 'no problem' for a fault whose
+    state is actually unknown - the exact coercion the library's None
+    defaults exist to eliminate. Unknown makes HA show the entity as
+    unknown instead."""
+    assert _sensor("grease_filter_due", clean_grease_filters=None).is_on is None
+    assert _sensor("charcoal_filter_due", clean_charcoal_filters=None).is_on is None
+    assert _sensor("fault", alarm_fault_code=None).is_on is None
+
+
 def test_grease_filter_exposes_the_overdue_alarm():
     """cleangreasefilters means due; alarmgreasefilter means overdue. One
     entity, with the severity as an attribute."""
     sensor = _sensor("grease_filter_due", alarm_grease_filter=1)
     assert sensor.extra_state_attributes["overdue"] is True
+
+
+def test_unreported_overdue_alarm_is_unknown():
+    sensor = _sensor("grease_filter_due", alarm_grease_filter=None)
+    assert sensor.extra_state_attributes["overdue"] is None
 
 
 @pytest.mark.parametrize(
@@ -81,6 +97,24 @@ def test_fan_fault_clear():
     assert _sensor("fan_fault").is_on is False
 
 
+@pytest.mark.parametrize(
+    ("alarm", "warning", "expected"),
+    [
+        (None, None, None),  # nothing known: unknown
+        (None, 0, None),     # the known flag is clear, the other unknown
+        (0, None, None),
+        (None, 1, True),     # a set flag is a problem whatever the other says
+        (1, None, True),
+    ],
+)
+def test_fan_fault_combines_unknown_flags_honestly(alarm, warning, expected):
+    """Set beats unknown beats clear: `state.alarm_fan or state.fan_warning`
+    would read (None, 0) as 'no problem' when the alarm's state is actually
+    unknown."""
+    sensor = _sensor("fan_fault", alarm_fan=alarm, fan_warning=warning)
+    assert sensor.is_on is expected
+
+
 def test_fault_reports_codes_as_an_attribute():
     sensor = _sensor("fault", alarm_fault_code=1, fault_codes=("E3", "E7"))
     assert sensor.is_on is True
@@ -91,6 +125,23 @@ def test_fault_clear_has_empty_codes():
     sensor = _sensor("fault")
     assert sensor.is_on is False
     assert sensor.extra_state_attributes["fault_codes"] == []
+
+
+def test_unreported_fault_codes_are_unknown_not_empty():
+    """fault_codes is None when the device did not report the field - an
+    empty list would claim the device positively reported no codes."""
+    sensor = _sensor("fault", fault_codes=None)
+    assert sensor.extra_state_attributes["fault_codes"] is None
+
+
+def test_charcoal_sensor_is_gated_on_an_advertised_life():
+    """None means the model does not advertise a charcoal filter - no
+    sensor, same as an advertised 0."""
+    description = next(d for d in BINARY_SENSORS if d.key == "charcoal_filter_due")
+    for hours, expected in ((None, False), (0, False), (200, True)):
+        caps = MagicMock()
+        caps.max_charcoal_filter_hours = hours
+        assert description.exists_fn(caps) is expected
 
 
 def test_returns_none_before_the_first_update():

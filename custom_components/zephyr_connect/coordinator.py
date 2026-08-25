@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pyzephyrconnect import (
-    HoodCapabilities,
+    Hood,
     HoodState,
     ZephyrAuthError,
-    ZephyrClient,
     ZephyrError,
+    ZephyrPolicyError,
 )
 
 from .const import (
@@ -37,21 +37,22 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
 
     Updates arrive by push: the library invokes our listener whenever the
     device reports. The polling interval here is a fallback, not the primary
-    path - it refreshes credentials and, when MQTT is down, re-reads state
-    over HTTPS so entities degrade instead of going unavailable.
+    path - when MQTT is down it re-reads state over HTTPS so entities degrade
+    instead of going unavailable, and it is how a terminal credential failure
+    inside the library's supervisor surfaces as a reauth prompt (the
+    supervisor re-raises it from the next hood.async_poll()).
     """
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        client: ZephyrClient,
-        capabilities: HoodCapabilities,
+        hood: Hood,
     ) -> None:
-        self.client = client
-        self.capabilities = capabilities
-        self.thing_name = capabilities.thing_name
-        self._unsubscribe: Any = None
+        self.hood = hood
+        self.capabilities = hood.capabilities
+        self.thing_name = hood.thing_name
+        self._unsubscribe: Callable[[], None] | None = None
         # Counts consecutive connected ticks since the last real poll (either
         # a safety-net poll below, or a degraded poll while disconnected).
         # Reaching SAFETY_NET_TICKS triggers a safety-net poll and resets it.
@@ -60,7 +61,7 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
             hass,
             _LOGGER,
             config_entry=entry,
-            name=f"{DOMAIN} {capabilities.model}",
+            name=f"{DOMAIN} {hood.capabilities.model}",
             update_interval=timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS),
         )
 
@@ -71,29 +72,27 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
 
     async def async_initialise(self) -> None:
         """Open the shadow connection and wire push updates."""
-        await self.client.async_start(self.thing_name)
-        self._unsubscribe = self.client.add_listener(
-            self.thing_name, self._handle_push
-        )
+        await self.hood.async_start()
+        self._unsubscribe = self.hood.add_listener(self._handle_push)
         # DataUpdateCoordinator only arms its periodic timer while it has at
         # least one registered listener (see async_add_listener /
         # _schedule_refresh in homeassistant.helpers.update_coordinator).
         # HA's convention is that this is a *feature*: stop polling when
         # nothing is listening, e.g. because the user disabled every entity
-        # for this hood. We deliberately override that convention here,
-        # because this coordinator's periodic tick does more than refresh
-        # entity data - it also refreshes cloud credentials that expire
-        # hourly (see async_refresh_if_needed() in _async_update_data()). If
-        # the tick stopped, credentials would lapse, the push (MQTT)
-        # connection would die once they did, and nothing would be left
-        # running to reconnect it or notice - the hood would go permanently
-        # stale even though its entities still exist and are simply idle.
-        # So polling must continue regardless of listener count, and we
-        # register a permanent no-op listener of our own to force that.
+        # for this hood. We deliberately override that convention here.
+        # The library supervises its own credential lifecycle now, so the
+        # tick no longer keeps credentials alive - but it is still the only
+        # path a terminal supervisor failure (rejected credentials, missing
+        # IoT policy) reaches us: the supervisor stops, disconnects the
+        # hoods, and re-raises from the next hood.async_poll(). A consumer
+        # that never polls never learns, so with every entity disabled the
+        # reauth prompt would simply never appear. Polling must therefore
+        # continue regardless of listener count, and we register a permanent
+        # no-op listener of our own to force that.
         self.async_add_listener(lambda: None)
         # Seed from whatever the library already cached during setup, so
         # entities have data before the first device report arrives.
-        if (cached := self.client.state(self.thing_name)) is not None:
+        if (cached := self.hood.state) is not None:
             self.async_set_updated_data(cached)
 
     @callback
@@ -108,24 +107,40 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
             self._unsubscribe = None
         await super().async_shutdown()
 
-    async def _async_update_data(self) -> HoodState:
-        """Fallback tick: refresh credentials, and re-read if push is down."""
+    async def _async_poll(self) -> HoodState:
+        """Read state over HTTPS, mapping library errors to HA's.
+
+        Both TERMINAL supervisor errors escalate to reauth, not just the
+        credential one. A terminal error stops the library's supervisor for
+        good and every later poll re-raises it, so mapping ZephyrPolicyError
+        to UpdateFailed would leave the hood unavailable forever - nothing
+        short of an entry reload rebuilds the supervisor. The reauth flow's
+        success path IS that reload, and a fresh setup re-runs the identity
+        exchange and re-attaches the IoT policy, which is the actual
+        remediation for a policy failure (attachments are keyed on the
+        identity).
+
+        This cannot fire for a Wi-Fi blip: the library keeps transient
+        failures - DNS, timeouts, throttling - as ZephyrTransportError,
+        which lands in the UpdateFailed clause below.
+        """
         try:
-            await self.client.async_refresh_if_needed()
-        except ZephyrAuthError as err:
+            return await self.hood.async_poll()
+        except (ZephyrAuthError, ZephyrPolicyError) as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except ZephyrError as err:
             raise UpdateFailed(str(err)) from err
 
-        if not self.client.connected:
+    async def _async_update_data(self) -> HoodState:
+        """Fallback tick: re-read over HTTPS if push is down or stale.
+
+        Credential refresh is deliberately NOT done here: the library's own
+        supervisor renews credentials and rebuilds sockets before expiry.
+        """
+        if not self.hood.connected:
             _LOGGER.debug("push transport down; reading state over HTTPS")
             self._connected_ticks = 0
-            try:
-                return await self.client.async_poll(self.thing_name)
-            except ZephyrAuthError as err:
-                raise ConfigEntryAuthFailed(str(err)) from err
-            except ZephyrError as err:
-                raise UpdateFailed(str(err)) from err
+            return await self._async_poll()
 
         self._connected_ticks += 1
         if self._connected_ticks >= SAFETY_NET_TICKS:
@@ -134,30 +149,9 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
             # was missed while the transport was briefly unhealthy.
             _LOGGER.debug("safety-net re-read: polling despite active push")
             self._connected_ticks = 0
-            try:
-                return await self.client.async_poll(self.thing_name)
-            except ZephyrAuthError as err:
-                raise ConfigEntryAuthFailed(str(err)) from err
-            except ZephyrError as err:
-                raise UpdateFailed(str(err)) from err
+            return await self._async_poll()
 
-        cached = self.client.state(self.thing_name)
+        cached = self.hood.state
         if cached is None:
             raise UpdateFailed("no state received yet")
         return cached
-
-    async def async_set_state(self, fields: dict[str, Any]) -> None:
-        """Write to the hood. ACTUATES HARDWARE.
-
-        The library writes state.reported - the device ignores state.desired
-        entirely. Never build shadow payloads here.
-
-        The device echoes its real state ~1.2-1.6s later via push, so no
-        optimistic local update is needed.
-        """
-        try:
-            await self.client.async_set_state(self.thing_name, fields)
-        except ZephyrAuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except ZephyrError as err:
-            raise UpdateFailed(f"write failed: {err}") from err

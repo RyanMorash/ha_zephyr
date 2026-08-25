@@ -6,7 +6,11 @@ import pytest
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import PERCENTAGE, UnitOfTime
 
-from custom_components.zephyr_connect.sensor import SENSORS, ZephyrSensor
+from custom_components.zephyr_connect.sensor import (
+    SENSORS,
+    ZephyrSensor,
+    _filter_remaining,
+)
 
 
 def _coordinator(**state_kwargs):
@@ -72,6 +76,25 @@ def test_exhausted_grease_filter_clamps_at_zero():
     ).native_value == 0
 
 
+def test_filter_remaining_handles_an_unadvertised_life():
+    """max_*_filter_hours is None when the model omits the key. The
+    exists_fn gate keeps such hoods from getting the sensor at all, but the
+    formula must not TypeError if it is ever reached."""
+    assert _filter_remaining(643, None) is None
+
+
+@pytest.mark.parametrize("hours", [None, 0])
+def test_filter_sensors_are_gated_on_an_advertised_life(hours):
+    """None means the model does not advertise a filter life - no sensor,
+    same as an advertised 0."""
+    caps = MagicMock()
+    caps.max_grease_filter_hours = hours
+    caps.max_charcoal_filter_hours = hours
+    for key in ("grease_filter", "charcoal_filter"):
+        description = next(d for d in SENSORS if d.key == key)
+        assert description.exists_fn(caps) is False
+
+
 def test_grease_filter_exposes_the_raw_counter():
     """The unit inference lives in the formula; surfacing the raw minutes
     makes a wrong assumption visible instead of silent."""
@@ -100,17 +123,28 @@ def test_runtime_sensors_are_hours():
     assert sensor.state_class is SensorStateClass.TOTAL_INCREASING
 
 
-def test_delay_remaining_is_seconds():
-    """The device counts down in seconds, reporting once a minute."""
+def test_delay_remaining_is_the_raw_countdown():
+    """Deliberately unitless, like the delay-off number: whether the timer
+    fields hold seconds or minutes is an open hardware-validation question
+    (the library's VALIDATION.md, question 2)."""
     sensor = _sensor("delay_remaining", delay_timer=240)
     assert sensor.native_value == 240
-    assert sensor.native_unit_of_measurement == UnitOfTime.SECONDS
+    assert sensor.native_unit_of_measurement is None
+    assert sensor.device_class is None
+
+
+def test_unreported_delay_remaining_is_unknown():
+    assert _sensor("delay_remaining", delay_timer=None).native_value is None
 
 
 def test_act_sensor_reports_airflow_control_technology():
     """ACT is Zephyr's Airflow Control Technology - an airflow cap for
     make-up-air code compliance, set physically on the hood. Read-only."""
     assert _sensor("act").native_value == "Disabled"
+
+
+def test_unreported_act_is_unknown():
+    assert _sensor("act", act=None).native_value is None
 
 
 @pytest.mark.parametrize(
@@ -120,6 +154,13 @@ def test_recirculating_is_read_only_text(value, expected):
     """Read-only by design: writing it would start charcoal accounting for
     a filter that may not be physically installed."""
     assert _sensor("recirculating", set_recirculating=value).native_value == expected
+
+
+def test_unreported_recirculating_is_unknown_not_ducted():
+    """None means the device did not report the field. 'ducted' is a
+    positive claim about how the hood is installed; unknown must not
+    silently become that claim."""
+    assert _sensor("recirculating", set_recirculating=None).native_value is None
 
 
 @pytest.mark.parametrize(

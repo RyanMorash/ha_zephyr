@@ -22,12 +22,16 @@ def _coordinator(power=0, clean_air=0):
     state.set_clean_air_function = clean_air
     state.is_online = True
 
+    hood = MagicMock()
+    hood.async_set_power = AsyncMock()
+    hood.async_set_clean_air = AsyncMock()
+
     coordinator = MagicMock()
     coordinator.capabilities = caps
     coordinator.thing_name = caps.thing_name
     coordinator.data = state
     coordinator.last_update_success = True
-    coordinator.async_set_state = AsyncMock()
+    coordinator.hood = hood
     return coordinator
 
 
@@ -36,39 +40,44 @@ def test_power_reflects_reported_state():
     assert ZephyrPowerSwitch(_coordinator(power=0)).is_on is False
 
 
+def test_unreported_power_is_unknown_not_off():
+    """power is None when the device did not report it - unknown, not off."""
+    assert ZephyrPowerSwitch(_coordinator(power=None)).is_on is None
+
+
 async def test_power_on_restores_previous_levels():
     """Validated: power=1 restored fan 6 and light 1 together. We just write
-    1 and let the device decide what to restore."""
+    True and let the device decide what to restore."""
     coordinator = _coordinator()
     await ZephyrPowerSwitch(coordinator).async_turn_on()
-    coordinator.async_set_state.assert_awaited_once_with({"power": 1})
+    coordinator.hood.async_set_power.assert_awaited_once_with(True)
 
 
 async def test_power_off_stops_everything():
     coordinator = _coordinator(power=1)
     await ZephyrPowerSwitch(coordinator).async_turn_off()
-    coordinator.async_set_state.assert_awaited_once_with({"power": 0})
+    coordinator.hood.async_set_power.assert_awaited_once_with(False)
 
 
 def test_clean_air_reflects_reported_state():
     assert ZephyrCleanAirSwitch(_coordinator(clean_air=1)).is_on is True
 
 
-async def test_clean_air_on_writes_one():
+def test_unreported_clean_air_is_unknown_not_off():
+    assert ZephyrCleanAirSwitch(_coordinator(clean_air=None)).is_on is None
+
+
+async def test_clean_air_on_writes_true():
     """Validated side effect: this also starts the fan at speed 1."""
     coordinator = _coordinator()
     await ZephyrCleanAirSwitch(coordinator).async_turn_on()
-    coordinator.async_set_state.assert_awaited_once_with(
-        {"setcleanairfunction": 1}
-    )
+    coordinator.hood.async_set_clean_air.assert_awaited_once_with(True)
 
 
-async def test_clean_air_off_writes_zero():
+async def test_clean_air_off_writes_false():
     coordinator = _coordinator(clean_air=1)
     await ZephyrCleanAirSwitch(coordinator).async_turn_off()
-    coordinator.async_set_state.assert_awaited_once_with(
-        {"setcleanairfunction": 0}
-    )
+    coordinator.hood.async_set_clean_air.assert_awaited_once_with(False)
 
 
 def test_clean_air_is_not_a_config_entity():

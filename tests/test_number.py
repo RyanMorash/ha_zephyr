@@ -1,4 +1,12 @@
-"""Delay-off number. Displayed in minutes, written in seconds."""
+"""Delay-off number. Raw device units - deliberately no unit or conversion.
+
+Whether the device reads setdelaytimer as seconds or minutes is an open
+hardware-validation question (the library's VALIDATION.md, question 2), so
+the entity presents the raw value and writes exactly what the user enters.
+An earlier version displayed minutes and multiplied by 60; these tests
+guard against that conversion sneaking back before the units are
+established.
+"""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -20,43 +28,49 @@ def _coordinator(set_delay=0):
     state.set_delay_timer = set_delay
     state.is_online = True
 
+    hood = MagicMock()
+    hood.async_set_delay_timer = AsyncMock()
+
     coordinator = MagicMock()
     coordinator.capabilities = caps
     coordinator.thing_name = caps.thing_name
     coordinator.data = state
     coordinator.last_update_success = True
-    coordinator.async_set_state = AsyncMock()
+    coordinator.hood = hood
     return coordinator
 
 
-@pytest.mark.parametrize(("seconds", "minutes"), [(0, 0), (300, 5), (600, 10), (60, 1)])
-def test_seconds_are_displayed_as_minutes(seconds, minutes):
-    """The device stores seconds; users think in minutes."""
-    assert ZephyrDelayNumber(_coordinator(set_delay=seconds)).native_value == minutes
+@pytest.mark.parametrize("raw", [0, 60, 300, 600])
+def test_raw_device_value_is_displayed_unconverted(raw):
+    """No unit inference: the device's own value, whatever it means."""
+    assert ZephyrDelayNumber(_coordinator(set_delay=raw)).native_value == raw
 
 
-@pytest.mark.parametrize(("minutes", "seconds"), [(5, 300), (10, 600), (1, 60)])
-async def test_setting_minutes_writes_seconds(minutes, seconds):
-    coordinator = _coordinator()
-    await ZephyrDelayNumber(coordinator).async_set_native_value(float(minutes))
-    coordinator.async_set_state.assert_awaited_once_with(
-        {"setdelaytimer": seconds}
+def test_no_unit_is_presented():
+    """The field's units are unvalidated; presenting one would be a guess
+    dressed up as a fact."""
+    assert (
+        ZephyrDelayNumber(_coordinator()).native_unit_of_measurement is None
     )
+
+
+def test_unreported_delay_is_unknown_not_zero():
+    """set_delay_timer is None when the device did not report it - unknown,
+    not 'timer off'."""
+    assert ZephyrDelayNumber(_coordinator(set_delay=None)).native_value is None
+
+
+@pytest.mark.parametrize("value", [0, 60, 300, 600])
+async def test_setting_writes_the_raw_value(value):
+    coordinator = _coordinator()
+    await ZephyrDelayNumber(coordinator).async_set_native_value(float(value))
+    coordinator.hood.async_set_delay_timer.assert_awaited_once_with(value)
 
 
 async def test_zero_disables_the_timer():
     coordinator = _coordinator(set_delay=300)
     await ZephyrDelayNumber(coordinator).async_set_native_value(0)
-    coordinator.async_set_state.assert_awaited_once_with({"setdelaytimer": 0})
-
-
-async def test_only_setdelaytimer_is_written():
-    """Validated: the DEVICE derives delaytimer from setdelaytimer and
-    counts it down. Writing delaytimer ourselves is unnecessary."""
-    coordinator = _coordinator()
-    await ZephyrDelayNumber(coordinator).async_set_native_value(5)
-    written = coordinator.async_set_state.call_args.args[0]
-    assert "delaytimer" not in written
+    coordinator.hood.async_set_delay_timer.assert_awaited_once_with(0)
 
 
 def test_is_a_config_entity():
@@ -70,10 +84,17 @@ def test_is_a_config_entity():
     )
 
 
-async def test_fractional_minutes_round_rather_than_truncate():
+@pytest.mark.parametrize(
+    ("value", "written"), [(39.7, 40), (0.5, 1), (2.5, 3), (0.1, 1)]
+)
+async def test_positive_fractional_values_always_arm_the_timer(value, written):
     """HA's number.set_value validates only min/max, not step, so an
-    automation can pass a fractional minute. int() would truncate
-    0.6666666 * 60 == 39.999996 down to 39 instead of rounding to 40."""
+    automation can pass a fractional value. int() would truncate 39.7 down
+    to 39; Python's half-to-even round() would turn 0.5 into 0 and 2.5
+    into 2; and even half-up turns 0.1 into 0. Asking for ANY positive
+    delay must arm the timer rather than silently disable it - the same
+    rule the light applies to turn_on never rounding down to off - so
+    positive requests clamp up to at least 1."""
     coordinator = _coordinator()
-    await ZephyrDelayNumber(coordinator).async_set_native_value(0.6666666)
-    assert coordinator.async_set_state.call_args.args[0] == {"setdelaytimer": 40}
+    await ZephyrDelayNumber(coordinator).async_set_native_value(value)
+    coordinator.hood.async_set_delay_timer.assert_awaited_once_with(written)
