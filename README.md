@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/zephyr-logo-white.svg">
+  <img src="assets/zephyr-logo-black.svg" alt="Zephyr" width="230">
+</picture>
+
 # Zephyr Connect for Home Assistant
 
 Control and monitor Zephyr range hoods from Home Assistant.
