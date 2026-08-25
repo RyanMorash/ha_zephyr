@@ -18,7 +18,12 @@ from custom_components.zephyr_connect.const import (
     DOMAIN,
 )
 from custom_components.zephyr_connect.coordinator import SAFETY_NET_TICKS
-from pyzephyrconnect import ZephyrAuthError, ZephyrError, ZephyrTokens
+from pyzephyrconnect import (
+    ZephyrAuthError,
+    ZephyrError,
+    ZephyrTokens,
+    ZephyrTransportError,
+)
 
 THING = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
 
@@ -337,6 +342,56 @@ async def test_terminal_supervisor_failure_reaches_reauth_via_poll(
         flow["context"]["source"] == "reauth"
         for flow in hass.config_entries.flow.async_progress()
     )
+
+
+async def test_transient_poll_failure_does_not_trigger_reauth(
+    hass, entry, mock_client
+) -> None:
+    """The other half of the poll error mapping: only genuine credential
+    rejections (ZephyrAuthError) are terminal - the library keeps DNS
+    failures, timeouts and Cognito throttling as the retryable
+    ZephyrTransportError precisely so consumers can map ZephyrAuthError to
+    a reauth prompt without it firing for a Wi-Fi blip. A transient poll
+    failure must mark the update failed and NOT start a reauth flow."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+
+    hood.connected = False
+    hood.async_poll.side_effect = ZephyrTransportError("dns blip")
+    async_fire_time_changed(
+        hass,
+        dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
+    )
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data.coordinators[0]
+    assert coordinator.last_update_success is False
+    assert not any(
+        flow["context"]["source"] == "reauth"
+        for flow in hass.config_entries.flow.async_progress()
+    )
+
+
+async def test_failed_platform_forwarding_still_stops_the_client(
+    hass, entry, mock_client
+) -> None:
+    """A setup that fails AFTER runtime_data is set (platform import error,
+    entity-platform setup failure) never reaches async_unload_entry - HA
+    only runs the entry's on_unload callbacks. The
+    entry.async_on_unload(client.async_stop) registration made before any
+    hood starts is the ONLY stop on that path; without it the client keeps
+    its credential supervisor and per-hood paho threads alive, leaking one
+    full client per setup retry."""
+    with patch.object(
+        hass.config_entries,
+        "async_forward_entry_setups",
+        side_effect=ImportError("broken platform"),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    mock_client.async_stop.assert_awaited()
 
 
 async def test_safety_net_does_not_poll_before_threshold(
