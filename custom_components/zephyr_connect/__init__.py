@@ -15,6 +15,7 @@ from pyzephyrconnect import (
     ZephyrClient,
     ZephyrDataError,
     ZephyrError,
+    ZephyrPolicyError,
     ZephyrTokens,
 )
 
@@ -110,7 +111,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> bo
 
     try:
         hoods = await client.async_setup()
-    except ZephyrAuthError as err:
+    except (ZephyrAuthError, ZephyrPolicyError) as err:
         await _release([], client)
         raise ConfigEntryAuthFailed(str(err)) from err
     except ZephyrError as err:
@@ -123,12 +124,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> bo
             coordinator = ZephyrCoordinator(hass, entry, hood)
             await coordinator.async_initialise()
             coordinators.append(coordinator)
-    except ZephyrAuthError as err:
-        # ZephyrAuthError subclasses ZephyrError, so it must be caught here
-        # first - otherwise an auth failure raised inside async_initialise()
-        # (e.g. from hood.async_start()) falls through to the ZephyrError
-        # clause below and gets downgraded to ConfigEntryNotReady, which
-        # retries forever instead of prompting the user to reauthenticate.
+    except (ZephyrAuthError, ZephyrPolicyError) as err:
+        # Both TERMINAL errors subclass ZephyrError directly, so they must
+        # be caught here first - otherwise one raised inside
+        # async_initialise() (hood.async_start() attaches the IoT policy
+        # and opens the shadow subscription, so it can raise either) falls
+        # through to the ZephyrError clause below and gets downgraded to
+        # ConfigEntryNotReady, which retries silently forever instead of
+        # prompting the user. This mirrors the coordinator's poll mapping:
+        # the reauth flow's success path reloads the entry, and a fresh
+        # setup re-runs the identity exchange and re-attaches the policy.
+        # Transient failures stay ZephyrTransportError and keep the
+        # NotReady retry below.
         await _release(coordinators, client)
         raise ConfigEntryAuthFailed(str(err)) from err
     except ZephyrError as err:

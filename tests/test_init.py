@@ -220,8 +220,16 @@ async def test_refreshed_tokens_are_persisted(hass, entry, mock_client) -> None:
     assert entry.data[CONF_TOKENS] == TOKENS_RECORD
 
 
-async def test_auth_failure_triggers_reauth(hass, entry, mock_client) -> None:
-    mock_client.async_setup.side_effect = ZephyrAuthError("expired")
+@pytest.mark.parametrize(
+    "error",
+    [ZephyrAuthError("expired"), ZephyrPolicyError("IoT refused the attach")],
+)
+async def test_terminal_failure_during_setup_triggers_reauth(
+    hass, entry, mock_client, error
+) -> None:
+    """Both terminal errors from client.async_setup() must land in
+    SETUP_ERROR (reauth), not the silent SETUP_RETRY loop."""
+    mock_client.async_setup.side_effect = error
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
@@ -236,6 +244,24 @@ async def test_auth_failure_during_hood_init_triggers_reauth(
     and land in SETUP_ERROR, not be caught by the broader ZephyrError clause
     and downgraded to a perpetual SETUP_RETRY."""
     _the_hood(mock_client).async_start.side_effect = ZephyrAuthError("expired")
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    mock_client.async_stop.assert_awaited()
+
+
+async def test_policy_failure_during_hood_init_triggers_reauth(
+    hass, entry, mock_client
+) -> None:
+    """hood.async_start() attaches the IoT policy and opens the shadow
+    subscription, so it can raise ZephyrPolicyError - the OTHER terminal
+    error, and NOT a ZephyrAuthError subclass. Falling through to the
+    generic ZephyrError clause would downgrade it to a silent, perpetual
+    SETUP_RETRY; like the coordinator's poll mapping, it must surface as
+    SETUP_ERROR so the reauth flow's reload can re-attach the policy."""
+    _the_hood(mock_client).async_start.side_effect = ZephyrPolicyError(
+        "IoT refused the attach"
+    )
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR

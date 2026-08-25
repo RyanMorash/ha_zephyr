@@ -84,14 +84,17 @@ def test_is_a_config_entity():
     )
 
 
-@pytest.mark.parametrize(("value", "written"), [(39.7, 40), (0.5, 1), (2.5, 3)])
-async def test_fractional_values_round_half_up(value, written):
+@pytest.mark.parametrize(
+    ("value", "written"), [(39.7, 40), (0.5, 1), (2.5, 3), (0.1, 1)]
+)
+async def test_positive_fractional_values_always_arm_the_timer(value, written):
     """HA's number.set_value validates only min/max, not step, so an
     automation can pass a fractional value. int() would truncate 39.7 down
-    to 39, and Python's half-to-even round() would turn 0.5 into 0 -
-    disabling the timer instead of arming it - and 2.5 into 2. Half-up is
-    the only rounding where every fractional input arms the timer the user
-    asked for."""
+    to 39; Python's half-to-even round() would turn 0.5 into 0 and 2.5
+    into 2; and even half-up turns 0.1 into 0. Asking for ANY positive
+    delay must arm the timer rather than silently disable it - the same
+    rule the light applies to turn_on never rounding down to off - so
+    positive requests clamp up to at least 1."""
     coordinator = _coordinator()
     await ZephyrDelayNumber(coordinator).async_set_native_value(value)
     coordinator.hood.async_set_delay_timer.assert_awaited_once_with(written)

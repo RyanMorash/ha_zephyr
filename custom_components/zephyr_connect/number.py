@@ -75,10 +75,14 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
         HA's number.set_value validates only min/max, not step, so an
         automation can pass a fractional value; round rather than truncate,
         and round HALF-UP rather than with Python's half-to-even round(),
-        which would turn 0.5 into 0 and disable the timer instead of arming
-        it. int() truncates, which is floor for the non-negative values the
-        min/max validation guarantees, so +0.5 then int() is half-up here.
+        which would turn 0.5 into 0. int() truncates, which is floor for
+        the non-negative values the min/max validation guarantees, so +0.5
+        then int() is half-up. A positive request below 0.5 still clamps up
+        to 1: asking for ANY positive delay must arm the timer, never
+        silently disable it - the same rule the light applies to turn_on
+        never rounding down to off. Only an explicit 0 turns the timer off.
         """
-        await self._async_write(
-            self.coordinator.hood.async_set_delay_timer(int(value + 0.5))
-        )
+        raw = int(value + 0.5)
+        if value > 0:
+            raw = max(1, raw)
+        await self._async_write(self.coordinator.hood.async_set_delay_timer(raw))
