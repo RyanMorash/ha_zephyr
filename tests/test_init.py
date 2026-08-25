@@ -21,6 +21,7 @@ from custom_components.zephyr_connect.coordinator import SAFETY_NET_TICKS
 from pyzephyrconnect import (
     ZephyrAuthError,
     ZephyrError,
+    ZephyrPolicyError,
     ZephyrTokens,
     ZephyrTransportError,
 )
@@ -332,6 +333,34 @@ async def test_terminal_supervisor_failure_reaches_reauth_via_poll(
 
     hood.connected = False  # the supervisor disconnected the hoods
     hood.async_poll.side_effect = ZephyrAuthError("refresh token revoked")
+    async_fire_time_changed(
+        hass,
+        dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
+    )
+    await hass.async_block_till_done()
+
+    assert any(
+        flow["context"]["source"] == "reauth"
+        for flow in hass.config_entries.flow.async_progress()
+    )
+
+
+async def test_terminal_policy_failure_reaches_reauth_via_poll(
+    hass, entry, mock_client
+) -> None:
+    """ZephyrPolicyError is the OTHER terminal supervisor error, and it is
+    NOT a ZephyrAuthError subclass - an unqualified ZephyrError clause would
+    map it to UpdateFailed, leaving the hood unavailable forever: the
+    supervisor is stopped and every later poll re-raises the stored error,
+    so nothing short of an entry reload recovers. The reauth flow's success
+    path is that reload, and a fresh setup re-runs the identity exchange
+    and re-attaches the IoT policy - the actual remediation."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+
+    hood.connected = False  # the supervisor disconnected the hoods
+    hood.async_poll.side_effect = ZephyrPolicyError("IoT policy not attached")
     async_fire_time_changed(
         hass,
         dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),

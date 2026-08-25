@@ -10,7 +10,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pyzephyrconnect import Hood, HoodState, ZephyrAuthError, ZephyrError
+from pyzephyrconnect import (
+    Hood,
+    HoodState,
+    ZephyrAuthError,
+    ZephyrError,
+    ZephyrPolicyError,
+)
 
 from .const import (
     DEGRADED_POLL_INTERVAL_SECONDS,
@@ -104,14 +110,23 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
     async def _async_poll(self) -> HoodState:
         """Read state over HTTPS, mapping library errors to HA's.
 
-        Only genuine credential rejections surface as ZephyrAuthError (the
-        library keeps transient failures - DNS, timeouts, throttling - as
-        ZephyrTransportError), so mapping it to a reauth prompt here will
-        not fire for a Wi-Fi blip.
+        Both TERMINAL supervisor errors escalate to reauth, not just the
+        credential one. A terminal error stops the library's supervisor for
+        good and every later poll re-raises it, so mapping ZephyrPolicyError
+        to UpdateFailed would leave the hood unavailable forever - nothing
+        short of an entry reload rebuilds the supervisor. The reauth flow's
+        success path IS that reload, and a fresh setup re-runs the identity
+        exchange and re-attaches the IoT policy, which is the actual
+        remediation for a policy failure (attachments are keyed on the
+        identity).
+
+        This cannot fire for a Wi-Fi blip: the library keeps transient
+        failures - DNS, timeouts, throttling - as ZephyrTransportError,
+        which lands in the UpdateFailed clause below.
         """
         try:
             return await self.hood.async_poll()
-        except ZephyrAuthError as err:
+        except (ZephyrAuthError, ZephyrPolicyError) as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except ZephyrError as err:
             raise UpdateFailed(str(err)) from err
