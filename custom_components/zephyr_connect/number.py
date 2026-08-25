@@ -73,8 +73,12 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
         device-managed state.
 
         HA's number.set_value validates only min/max, not step, so an
-        automation can pass a fractional value; round rather than truncate.
+        automation can pass a fractional value; round rather than truncate,
+        and round HALF-UP rather than with Python's half-to-even round(),
+        which would turn 0.5 into 0 and disable the timer instead of arming
+        it. int() truncates, which is floor for the non-negative values the
+        min/max validation guarantees, so +0.5 then int() is half-up here.
         """
         await self._async_write(
-            self.coordinator.hood.async_set_delay_timer(round(value))
+            self.coordinator.hood.async_set_delay_timer(int(value + 0.5))
         )

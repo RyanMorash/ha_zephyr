@@ -63,5 +63,7 @@ async def test_button_is_gated_on_having_a_grease_filter():
         entry = MagicMock()
         entry.runtime_data = [coordinator]
         added = []
-        await async_setup_entry(MagicMock(), entry, lambda e: added.extend(e))
+        await async_setup_entry(
+            MagicMock(), entry, lambda e, added=added: added.extend(e)
+        )
         assert len(added) == expected

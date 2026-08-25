@@ -12,8 +12,8 @@ from custom_components.zephyr_connect.diagnostics import (
 THING = "aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee"
 SERIAL = "1234567XYZ"
 MAC = "00:00:5e:00:53:00"
-ID_TOKEN = "eyJr.id.token"
-REFRESH_TOKEN = "eyJr.refresh.token"
+ID_TOKEN = "eyJr.id.token"  # noqa: S105 - sentinel, not a real credential
+REFRESH_TOKEN = "eyJr.refresh.token"  # noqa: S105 - sentinel, not a real credential
 IDENTITY_ID = "us-west-2:00000000-1111-2222-3333-444455556666"
 
 

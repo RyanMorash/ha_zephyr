@@ -217,5 +217,5 @@ async def test_reauth_updates_the_password_and_tokens(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert entry.data["password"] == "new-password"
+    assert entry.data["password"] == "new-password"  # noqa: S105
     assert entry.data[CONF_TOKENS] == TOKENS_RECORD

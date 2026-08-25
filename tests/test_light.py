@@ -112,5 +112,7 @@ async def test_light_is_gated_on_an_advertised_maximum():
         entry = MagicMock()
         entry.runtime_data = [_coordinator(max_level=max_level)]
         added = []
-        await async_setup_entry(MagicMock(), entry, lambda e: added.extend(e))
+        await async_setup_entry(
+            MagicMock(), entry, lambda e, added=added: added.extend(e)
+        )
         assert len(added) == expected
