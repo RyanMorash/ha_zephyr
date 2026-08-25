@@ -7,6 +7,6 @@
   "integration_type": "hub",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/RyanMorash/ha_zephyr/issues",
-  "requirements": ["pyzephyrconnect @ git+https://github.com/RyanMorash/pyzephyrconnect@main"],
+  "requirements": ["pyzephyrconnect@git+https://github.com/RyanMorash/pyzephyrconnect@main"],
   "version": "0.1.0"
 }
