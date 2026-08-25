@@ -9,7 +9,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.zephyr_connect.const import CONF_TOKENS, DOMAIN
-from pyzephyrconnect import ZephyrAuthError, ZephyrError, ZephyrTokens
+from pyzephyrconnect import ZephyrAuthError, ZephyrDataError, ZephyrError, ZephyrTokens
 
 USER_INPUT = {"username": "user@example.com", "password": "hunter2"}
 
@@ -136,6 +136,33 @@ async def test_connection_error_is_recoverable(hass: HomeAssistant, mock_client)
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_malformed_cloud_data_is_not_reported_as_cannot_connect(
+    hass: HomeAssistant, mock_client, caplog
+) -> None:
+    """ZephyrDataError means the cloud WAS reached and responded - the
+    payload was malformed (an unparseable capability, a non-object body).
+    'Could not reach the Zephyr cloud service' would send the user off to
+    check their network for a failure no retry can fix, and swallowing it
+    unlogged would leave a filed bug report with no trace of the actual
+    cause: this except clause is the only place the library's diagnostic
+    text (naming the offending key) can reach the log."""
+    mock_client.async_setup.side_effect = ZephyrDataError(
+        "maxFanSpeed was present but unparseable: 6.5"
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], USER_INPUT
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "unknown"}
+    assert "malformed data" in caplog.text
+    assert "maxFanSpeed" in caplog.text
 
 
 async def test_account_cannot_be_added_twice(hass: HomeAssistant, mock_client) -> None:

@@ -60,12 +60,12 @@ def test_unavailable_when_the_hood_is_offline():
 
 
 def test_available_when_online_status_is_unreported():
-    """is_online is None when the latest state came from a source that does
+    """is_online is None when the latest state came from a payload that did
     not carry it: a full shadow document replaces the cache wholesale, and
-    isOnline is a discoverdevice field, not a shadow one. A hood that just
-    pushed a shadow document is plainly reachable, so None must mean 'no
-    news', not 'offline' - otherwise entities would flap unavailable after
-    every full shadow read."""
+    not every reported block includes isOnline. A hood that just pushed a
+    shadow document is plainly reachable, so None must mean 'no news', not
+    'offline' - otherwise entities would flap unavailable after every full
+    shadow read."""
     assert ZephyrEntity(_coordinator(is_online=None), "fan").available is True
 
 

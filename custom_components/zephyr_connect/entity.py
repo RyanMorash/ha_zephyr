@@ -50,12 +50,13 @@ class ZephyrEntity(CoordinatorEntity[ZephyrCoordinator]):
         These are different failures: last_update_success covers our cloud
         path, is_online is the device telling the cloud it is reachable.
 
-        is_online is None when the latest state came from a source that does
-        not carry it - a full shadow document replaces the cache wholesale,
-        and isOnline is a discoverdevice field, not a shadow field - so None
+        is_online is None when the latest state came from a payload that
+        did not carry it - a full shadow document replaces the cache
+        wholesale, and not every reported block includes isOnline - so None
         means "no news", not "offline". A hood that just pushed a shadow
         document is plainly reachable; only an explicit False may mark it
-        unavailable.
+        unavailable. (A stale False also self-heals: the reference shadow
+        documents carry isOnline, so the next push overwrites it.)
         """
         if not self.coordinator.last_update_success:
             return False

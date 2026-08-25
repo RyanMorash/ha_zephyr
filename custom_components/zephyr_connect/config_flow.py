@@ -10,7 +10,13 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pyzephyrconnect import ZephyrAuthError, ZephyrClient, ZephyrError, ZephyrTokens
+from pyzephyrconnect import (
+    ZephyrAuthError,
+    ZephyrClient,
+    ZephyrDataError,
+    ZephyrError,
+    ZephyrTokens,
+)
 
 from .const import CONF_TOKENS, DOMAIN
 
@@ -72,6 +78,17 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except ZephyrAuthError:
                 errors["base"] = "invalid_auth"
+            except ZephyrDataError:
+                # The cloud WAS reached and responded - the payload was
+                # malformed (an unparseable capability, a non-object body).
+                # "cannot_connect" would send the user off to check their
+                # network for a failure no retry can fix, and this except
+                # is the only place the library's diagnostic text (naming
+                # the offending key) can reach the log.
+                _LOGGER.exception(
+                    "Zephyr cloud returned malformed data during validation"
+                )
+                errors["base"] = "unknown"
             except ZephyrError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
@@ -106,6 +123,13 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except ZephyrAuthError:
                 errors["base"] = "invalid_auth"
+            except ZephyrDataError:
+                # See async_step_user: malformed cloud data, not a
+                # connectivity problem - log the only trail and be honest.
+                _LOGGER.exception(
+                    "Zephyr cloud returned malformed data during reauth"
+                )
+                errors["base"] = "unknown"
             except ZephyrError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
