@@ -28,7 +28,8 @@ def _filter_remaining(used_minutes: int, life_hours: int | None) -> float | None
     """Percentage of filter life left.
 
     Verified against the vendor app: 643 minutes against a 60-hour life
-    yields 82.1%, and the app displays 82%.
+    yields 82.1%, and the app displays 82%. This is the formula the library
+    publishes in PROTOCOL.md section 5.
 
     The counter is in MINUTES and the capability maximum is in HOURS - a
     mismatch that is easy to miss and wrong by 60x if conflated.
@@ -91,6 +92,12 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
     ZephyrSensorDescription(
         key="fan_runtime",
         translation_key="fan_runtime",
+        # HOURS, and confirmed as such: these counters held flat across
+        # five minutes of running while the grease-filter counter moved,
+        # and the readings reconcile with the hood's age on hours (the
+        # library's PROTOCOL.md section 5). Note the trap they sit next to
+        # - the filter counters in the same payload are MINUTES, so
+        # conflating the two is wrong by 60x in whichever direction.
         native_unit_of_measurement=UnitOfTime.HOURS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.TOTAL_INCREASING,
@@ -111,13 +118,16 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
     ZephyrSensorDescription(
         key="delay_remaining",
         translation_key="delay_remaining",
-        # Deliberately unitless, like the delay-off number: whether the
-        # timer fields hold seconds or minutes is an open
-        # hardware-validation question (the library's VALIDATION.md,
-        # question 2), and a duration device class needs a unit. The raw
-        # countdown value still shows the timer running and reaching zero.
-        # delay_timer is None when unreported, which a sensor shows as
-        # unknown - exactly right.
+        # Seconds, like the delay-off number it counts down from: the
+        # device derives `delaytimer` from `setdelaytimer` and decrements
+        # it in 60-second steps, and the countdown has been watched to zero
+        # (the library's PROTOCOL.md section 5). This was unitless while
+        # that was still an open validation question; a duration device
+        # class needs a unit, and guessing one would have been a guess
+        # dressed up as a fact. delay_timer is None when unreported, which
+        # a sensor shows as unknown - exactly right.
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
         value_fn=lambda state, _caps: state.delay_timer,
     ),
     ZephyrSensorDescription(
@@ -129,6 +139,12 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         # settable from the cloud, so this is strictly a readout - but a
         # meaningful one, since ACT being enabled explains why the hood's
         # airflow is limited. Enabled by default for that reason.
+        #
+        # Stays a free-form string, deliberately. "Disabled" is still the
+        # only value ever observed (the library's PROTOCOL.md section 7
+        # lists this as open), and an enum or a translated device class
+        # built on one sample would mistranslate every other value the
+        # moment one appears.
         # `or None` folds both None (unreported) and "" into unknown.
         value_fn=lambda state, _caps: state.act or None,
     ),

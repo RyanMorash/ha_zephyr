@@ -1,16 +1,19 @@
-"""Delay-off number. Raw device units - deliberately no unit or conversion.
+"""Delay-off number. Seconds, and no conversion.
 
-Whether the device reads setdelaytimer as seconds or minutes is an open
-hardware-validation question (the library's VALIDATION.md, question 2), so
-the entity presents the raw value and writes exactly what the user enters.
-An earlier version displayed minutes and multiplied by 60; these tests
-guard against that conversion sneaking back before the units are
-established.
+setdelaytimer is seconds - established against the reference hood and
+recorded in the library's PROTOCOL.md section 5, which is what lets this
+entity carry a unit at all. It still writes exactly what the user enters:
+seconds is the device's own unit, so a pass-through keeps the entity an
+exact mirror of the field. An earlier version displayed minutes and
+multiplied by 60; these tests guard against that conversion coming back and
+rounding away timers the device can hold.
 """
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.components.number import NumberDeviceClass
+from homeassistant.const import UnitOfTime
 
 from custom_components.zephyr_connect.number import ZephyrDelayNumber
 
@@ -40,18 +43,22 @@ def _coordinator(set_delay=0):
     return coordinator
 
 
-@pytest.mark.parametrize("raw", [0, 60, 300, 600])
+@pytest.mark.parametrize("raw", [0, 60, 90, 300, 600])
 def test_raw_device_value_is_displayed_unconverted(raw):
-    """No unit inference: the device's own value, whatever it means."""
+    """Seconds in, seconds out. 90 is the case a minutes display would
+    round: the device holds off-preset values, so the entity must show the
+    one it is actually holding."""
     assert ZephyrDelayNumber(_coordinator(set_delay=raw)).native_value == raw
 
 
-def test_no_unit_is_presented():
-    """The field's units are unvalidated; presenting one would be a guess
+def test_the_unit_is_seconds():
+    """setdelaytimer is seconds (the library's PROTOCOL.md section 5), so
+    the entity says so. It was deliberately unitless while that was still
+    an open validation question - a unit then would have been a guess
     dressed up as a fact."""
-    assert (
-        ZephyrDelayNumber(_coordinator()).native_unit_of_measurement is None
-    )
+    number = ZephyrDelayNumber(_coordinator())
+    assert number.native_unit_of_measurement == UnitOfTime.SECONDS
+    assert number.device_class is NumberDeviceClass.DURATION
 
 
 def test_unreported_delay_is_unknown_not_zero():
@@ -60,8 +67,11 @@ def test_unreported_delay_is_unknown_not_zero():
     assert ZephyrDelayNumber(_coordinator(set_delay=None)).native_value is None
 
 
-@pytest.mark.parametrize("value", [0, 60, 300, 600])
+@pytest.mark.parametrize("value", [0, 60, 90, 300, 600])
 async def test_setting_writes_the_raw_value(value):
+    """Written in seconds, unmultiplied - the library's
+    async_set_delay_timer takes seconds and passes them straight to
+    setdelaytimer."""
     coordinator = _coordinator()
     await ZephyrDelayNumber(coordinator).async_set_native_value(float(value))
     coordinator.hood.async_set_delay_timer.assert_awaited_once_with(value)

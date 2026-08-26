@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import (
+    NumberDeviceClass,
+    NumberEntity,
+    NumberMode,
+)
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -25,17 +30,18 @@ async def async_setup_entry(
 
 
 class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
-    """Delay-off duration, in the device's raw units.
+    """Delay-off duration, in seconds.
 
-    Deliberately UNITLESS. Whether the device reads this field as seconds
-    or minutes - and whether it snaps to presets - is an open
-    hardware-validation question (the library's VALIDATION.md, question 2);
-    the vendor app writes 300 for its "5 minutes" preset, which suggests
-    seconds, but the device has never been watched counting down. Until
-    that validation runs, this presents the raw value the device reports
-    and writes exactly what the user enters - no unit, no conversion. An
-    earlier draft presented minutes and multiplied by 60; that conversion
-    belongs back here only once the units are established.
+    SECONDS is now established rather than inferred: the device counts
+    `setdelaytimer` down in 60-second steps and the countdown has been
+    watched to zero (the library's PROTOCOL.md section 5). This carried no
+    unit while that was still an open validation question.
+
+    Still no conversion, though. Seconds is the device's own unit and the
+    library's, so passing the value straight through keeps the entity an
+    exact mirror of `setdelaytimer` - a minutes display would round a
+    90-second timer set from the vendor app or another client, and buy
+    nothing the user cannot get from the duration device class.
 
     ACTUATES: writing a non-zero value starts the fan at speed 1. That is
     validated device behaviour, not a bug - a delay-off timer implies the
@@ -43,12 +49,16 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
     that starts an appliance is otherwise a surprise.
 
     The vendor app offers only two presets, but the device accepts
-    arbitrary values, so this exposes the full range. The upper bound is a
-    UI cap, not a device limit - the real ceiling is unknown.
+    arbitrary values, so this exposes the full range. The upper bound is
+    where the evidence stops, not a known device limit: DELAY_TIMER_MAX is
+    the largest value proven accepted, and the real ceiling is still
+    unprobed.
     """
 
     _attr_translation_key = "delay_off"
     _attr_entity_category = EntityCategory.CONFIG
+    _attr_device_class = NumberDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_native_min_value = 0
     _attr_native_max_value = DELAY_TIMER_MAX
     _attr_native_step = 1
@@ -66,7 +76,7 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
         return state.set_delay_timer
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write setdelaytimer only.
+        """Write setdelaytimer only, in seconds.
 
         The device derives `delaytimer` from this and counts it down itself,
         reporting once a minute. Writing `delaytimer` too would duplicate

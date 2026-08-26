@@ -78,9 +78,11 @@ BINARY_SENSORS: tuple[ZephyrBinarySensorDescription, ...] = (
         key="fan_fault",
         translation_key="fan_fault",
         device_class=BinarySensorDeviceClass.PROBLEM,
-        # alarmfan and fanwarning may differ in severity - unconfirmed,
-        # neither has ever fired on the reference device. Either means the
-        # fan needs attention.
+        # alarmfan and fanwarning may differ in severity - still
+        # unconfirmed, and still listed as open in the library's
+        # PROTOCOL.md section 7: neither has ever fired on the reference
+        # device. Either means the fan needs attention, so they combine
+        # into one entity with both flags kept as attributes.
         is_on_fn=lambda state: _any_flag(state.alarm_fan, state.fan_warning),
         attributes_fn=lambda state: {
             "alarm": _flag(state.alarm_fan),

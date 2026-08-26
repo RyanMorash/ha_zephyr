@@ -21,6 +21,13 @@ async def async_setup_entry(
 
     max_grease_filter_hours is None when the model does not advertise one -
     absent means "not advertised", so no button, same as an advertised 0.
+
+    Grease only, and not an oversight: the shadow carries no
+    `resetcharcoalfilter` field, and whether the vendor app has a charcoal
+    reset at all - or quietly reuses `resetgreasefilter` - is still open
+    (the library's PROTOCOL.md section 7). So a recirculating hood gets a
+    charcoal-life sensor with no reset to pair with it. Inventing one by
+    writing the grease field would zero the wrong counter.
     """
     async_add_entities(
         ZephyrResetGreaseFilterButton(coordinator)
