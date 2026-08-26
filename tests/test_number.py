@@ -57,7 +57,7 @@ def test_the_unit_is_seconds():
     an open validation question - a unit then would have been a guess
     dressed up as a fact."""
     number = ZephyrDelayNumber(_coordinator())
-    assert number.native_unit_of_measurement is UnitOfTime.SECONDS
+    assert number.native_unit_of_measurement == UnitOfTime.SECONDS
     assert number.device_class is NumberDeviceClass.DURATION
 
 

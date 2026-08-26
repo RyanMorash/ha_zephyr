@@ -134,7 +134,7 @@ def test_delay_remaining_is_a_countdown_in_seconds():
     guessing one would have been a guess dressed up as a fact."""
     sensor = _sensor("delay_remaining", delay_timer=240)
     assert sensor.native_value == 240
-    assert sensor.native_unit_of_measurement is UnitOfTime.SECONDS
+    assert sensor.native_unit_of_measurement == UnitOfTime.SECONDS
     assert sensor.device_class is SensorDeviceClass.DURATION
 
 
