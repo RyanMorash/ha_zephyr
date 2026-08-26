@@ -18,7 +18,7 @@ from pyzephyrconnect import (
     ZephyrTokens,
 )
 
-from .const import CONF_TOKENS, DOMAIN
+from .const import CONF_TOKENS, DOMAIN, MQTT_CLIENT_ID_SUFFIX
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +58,13 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
             password,
             async_get_clientsession(self.hass),
             token_updater=_capture,
+            # The same consumer identity async_setup_entry connects under.
+            # Validation only reaches the REST path today, so the suffix is
+            # unused here - but the client is built the same way in both
+            # places deliberately, so the two cannot drift, and the
+            # library's construction-time check on the value runs while the
+            # user is still looking at the form.
+            client_id_suffix=MQTT_CLIENT_ID_SUFFIX,
         )
         try:
             await client.async_setup()

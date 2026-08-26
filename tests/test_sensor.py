@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from homeassistant.components.sensor import SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import PERCENTAGE, UnitOfTime
 
 from custom_components.zephyr_connect.sensor import (
@@ -115,22 +115,27 @@ def test_charcoal_filter_reads_full_on_a_ducted_hood():
 
 
 def test_runtime_sensors_are_hours():
-    """Inferred, not measured - see the plan's protocol section. If this
-    proves wrong it is a one-line change."""
+    """Confirmed, not inferred: these counters held flat across five
+    minutes of running while the grease-filter counter moved, and the
+    readings reconcile with the hood's age on hours (the library's
+    PROTOCOL.md section 5). The filter counters in the same payload are
+    minutes, so this pairs with test_grease_filter_exposes_the_raw_counter
+    to pin both units and keep the 60x confusion from creeping in."""
     sensor = _sensor("fan_runtime")
     assert sensor.native_value == 1979
     assert sensor.native_unit_of_measurement == UnitOfTime.HOURS
     assert sensor.state_class is SensorStateClass.TOTAL_INCREASING
 
 
-def test_delay_remaining_is_the_raw_countdown():
-    """Deliberately unitless, like the delay-off number: whether the timer
-    fields hold seconds or minutes is an open hardware-validation question
-    (the library's VALIDATION.md, question 2)."""
+def test_delay_remaining_is_a_countdown_in_seconds():
+    """delaytimer is seconds, decremented by the device in 60-second steps
+    (the library's PROTOCOL.md section 5). It was unitless while that was
+    an open validation question; a duration device class needs a unit, and
+    guessing one would have been a guess dressed up as a fact."""
     sensor = _sensor("delay_remaining", delay_timer=240)
     assert sensor.native_value == 240
-    assert sensor.native_unit_of_measurement is None
-    assert sensor.device_class is None
+    assert sensor.native_unit_of_measurement is UnitOfTime.SECONDS
+    assert sensor.device_class is SensorDeviceClass.DURATION
 
 
 def test_unreported_delay_remaining_is_unknown():

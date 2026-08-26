@@ -19,7 +19,7 @@ from pyzephyrconnect import (
     ZephyrTokens,
 )
 
-from .const import CONF_TOKENS, PLATFORMS
+from .const import CONF_TOKENS, MQTT_CLIENT_ID_SUFFIX, PLATFORMS
 from .coordinator import ZephyrCoordinator
 
 
@@ -100,6 +100,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZephyrConfigEntry) -> bo
         async_get_clientsession(hass),
         tokens=tokens,
         token_updater=_store_tokens,
+        # Passed explicitly, never left to the library's default: 0.2.0
+        # changed that default from "-ha" to "-py", so relying on it would
+        # move every existing install's MQTT client ID and put us on the
+        # same ID as a plain pyzephyrconnect script. AWS IoT evicts one of
+        # two connections sharing an ID, so both would flap.
+        client_id_suffix=MQTT_CLIENT_ID_SUFFIX,
     )
     # Registered BEFORE any hood starts, as the library asks: HA runs
     # on_unload callbacks on unload and on failed setup, and async_stop is

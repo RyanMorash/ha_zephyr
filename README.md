@@ -31,7 +31,7 @@ re-authenticating.
 | Light | Brightness gated on `maxLightLevel` |
 | Power switch | Off stops everything; on restores the previous levels |
 | Clean air switch | **Starts the fan at speed 1** when enabled |
-| Delay off | Raw device value, no unit — see below. **Setting a value starts the fan at speed 1** |
+| Delay off | Seconds. **Setting a value starts the fan at speed 1** |
 | Reset grease filter | Zeroes the usage counter — see below |
 | Grease / charcoal filter | Percentage of life remaining |
 | Fan / light runtime | Diagnostic, disabled by default |
@@ -52,13 +52,17 @@ this integration.
 everything; turning it back on restores the fan and light to the levels they
 were running at before, rather than starting fresh.
 
-**Delay off has no unit yet.** Whether the device reads the field as seconds
-or minutes has not been validated against hardware (the vendor app writes 300
-for its "5 minutes" preset, which suggests seconds, but the countdown has
-never been watched). Until that validation runs, the entity shows and writes
-the device's raw value with no unit — presenting one would be a guess dressed
-up as a fact. The vendor app only offers two presets, but the device accepts
-arbitrary values, so this integration exposes a free-entry number.
+**Delay off is in seconds, up to an hour.** That is now established against
+hardware rather than inferred — the device counts the timer down in 60-second
+steps and shuts the hood off at zero — so the entity carries the unit instead
+of showing a bare number. It is not converted to minutes: seconds is the
+device's own unit, and rounding to minutes would misreport a timer set to
+something in between from the vendor app.
+
+The vendor app offers only two presets, but the device accepts arbitrary
+values, so this integration exposes a free-entry number. Its 3600-second cap
+is the largest value proven accepted, not a known device limit — nobody has
+established where the hood's own ceiling is.
 
 **Reset grease filter is destructive and untested.** It zeroes a counter that
 cannot be reconstructed, and the write has never been validated against
@@ -68,6 +72,11 @@ you have genuinely cleaned yours.
 **Ducted vs recirculating is read-only.** Changing it would start charcoal
 filter accounting for a filter that may not be installed. Use the vendor app
 if you genuinely need to change it.
+
+**There is no charcoal filter reset.** The hood's shadow exposes a grease
+filter reset and nothing equivalent for charcoal, so a recirculating hood gets
+a charcoal-life reading with no way to zero it from here. Whether the vendor
+app has one — and whether it quietly reuses the grease reset — is unknown.
 
 **Light is brightness-only, even on hoods that support tunable white.** The
 hood used to build this integration doesn't support TruHue (Zephyr's

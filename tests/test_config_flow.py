@@ -72,6 +72,9 @@ def mock_client():
     ):
         flow_cls.from_credentials.side_effect = fake_from_credentials
         init_cls.from_credentials.side_effect = fake_from_credentials
+        # Exposed so a test can assert on HOW the client was built, not
+        # just on what came back from it.
+        client.mock_flow_from_credentials = flow_cls.from_credentials
         yield client
 
 
@@ -89,6 +92,26 @@ async def test_user_flow_creates_entry(hass: HomeAssistant, mock_client) -> None
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "user@example.com"
     assert result["data"] == {**USER_INPUT, CONF_TOKENS: TOKENS_RECORD}
+
+
+async def test_validation_builds_the_client_the_same_way_as_setup(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """Both client construction sites pass the same client-ID suffix.
+
+    Validation only reaches the REST path today, so the suffix goes unused
+    here - but the two sites are deliberately identical so they cannot
+    drift, and the library validates the value at construction, which puts
+    a bad one in front of the user while the form is still open.
+    """
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    await hass.async_block_till_done()
+
+    kwargs = mock_client.mock_flow_from_credentials.call_args.kwargs
+    assert kwargs["client_id_suffix"] == "-ha"
 
 
 async def test_validation_tokens_ride_into_the_entry(

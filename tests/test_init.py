@@ -159,6 +159,24 @@ async def test_setup_without_saved_tokens_passes_none(
     assert kwargs["token_updater"] is not None
 
 
+async def test_setup_pins_the_home_assistant_client_id_suffix(
+    hass, entry, mock_client
+) -> None:
+    """The MQTT client ID must identify THIS consumer, explicitly.
+
+    pyzephyrconnect 0.2.0 made the suffix a per-consumer argument and moved
+    its own default from "-ha" to "-py". Leaving it defaulted would change
+    the client ID every existing install already connects under, and put
+    the integration on the same ID as a plain library script - and AWS IoT
+    evicts one of two connections sharing an ID, so both would flap.
+    """
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    kwargs = mock_client.mock_from_credentials.call_args.kwargs
+    assert kwargs["client_id_suffix"] == "-ha"
+
+
 async def test_setup_restores_saved_tokens(hass, mock_client) -> None:
     """A persisted record must reach the library as a ZephyrTokens, so a
     restart skips the rate-limited SRP login."""
