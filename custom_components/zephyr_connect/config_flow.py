@@ -10,6 +10,8 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pyzephyrconnect import (
     ZephyrAuthError,
     ZephyrClient,
@@ -73,6 +75,54 @@ class ZephyrConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         finally:
             await client.async_stop()
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """Offer setup when a hood takes a DHCP lease on this network.
+
+        Discovery here is a prompt, not a transport. These hoods speak no
+        local protocol - every read and write in this integration is a
+        cloud round trip - so a lease proves only that the hardware is on
+        the network. It cannot say which Zephyr account owns the hood, and
+        the account is what a config entry is keyed on, so the user still
+        has to sign in. What discovery buys is the introduction: an owner
+        who never went looking for this integration gets told it exists.
+
+        Nothing from the lease reaches the entry this flow creates. The IP
+        is never touched - connecting to it would be meaningless - and the
+        MAC serves only as the flow's unique ID. That one use does outlive
+        the flow in a single case: dismissing the card writes an ignored
+        entry keyed on the MAC, which is the only way Home Assistant can
+        remember a dismissal. Neither value is ever logged; the MAC is
+        personal data.
+        """
+        # Identifies the FLOW, not the eventual entry - async_step_user
+        # replaces it with the Cognito identity before creating anything.
+        # Two things need a flow-level ID: Home Assistant only offers
+        # "Ignore" on a flow that carries one, and it is what makes the
+        # next lease renewal land on the card already on screen instead of
+        # stacking another beside it.
+        await self.async_set_unique_id(format_mac(discovery_info.macaddress))
+        # Catches the hood whose card the user already dismissed: ignoring
+        # writes an entry under this same MAC.
+        self._abort_if_unique_id_configured()
+
+        # An account is already set up, so there is nothing to introduce.
+        # One entry covers every hood on its account, and a lease carries
+        # nothing that would distinguish a second account from the first -
+        # so a card here could only offer a duplicate. Someone who really
+        # does have two accounts adds the second one by hand.
+        #
+        # Ignored entries are excluded deliberately, and explicitly rather
+        # than by leaning on what this helper infers from the flow source:
+        # an ignore records one dismissed hood, not a configured account,
+        # so counting it here would let the card the owner dismissed in the
+        # kitchen bury the one for a second hood they do want.
+        if self._async_current_entries(include_ignore=False):
+            return self.async_abort(reason="already_configured")
+
+        return await self.async_step_user()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

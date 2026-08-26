@@ -3,6 +3,12 @@
   "name": "Zephyr Connect",
   "codeowners": ["@RyanMorash"],
   "config_flow": true,
+  "dhcp": [
+    {
+      "hostname": "zephyr_hood*",
+      "macaddress": "F8F005*"
+    }
+  ],
   "documentation": "https://github.com/RyanMorash/ha_zephyr",
   "integration_type": "hub",
   "iot_class": "cloud_push",

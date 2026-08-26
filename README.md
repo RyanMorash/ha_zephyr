@@ -17,6 +17,13 @@ Add this repository as a HACS custom repository, install **Zephyr Connect**,
 restart Home Assistant, then add the integration and sign in with the account
 you use in the Zephyr Connect app.
 
+You may not have to go looking for it. Home Assistant recognises a Zephyr hood
+by the DHCP lease it takes, so after the restart a card usually appears under
+**Settings → Devices & services** on its own — within the hour, or sooner if
+the hood renews its lease before that. The card is a shortcut to the same
+sign-in, not a local connection: the hood exposes no local API, so its address
+on your network is noted and never used.
+
 The integration installs its
 [pyzephyrconnect](https://pypi.org/project/pyzephyrconnect/) library from
 PyPI. Signing in runs a full login once; afterwards the integration stores

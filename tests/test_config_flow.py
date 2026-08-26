@@ -1,17 +1,36 @@
 """Config flow tests. No network: ZephyrClient is mocked."""
 
+import logging
+from fnmatch import fnmatch
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+from homeassistant.loader import async_get_integration
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.zephyr_connect.const import CONF_TOKENS, DOMAIN
 from pyzephyrconnect import ZephyrAuthError, ZephyrDataError, ZephyrError, ZephyrTokens
 
 USER_INPUT = {"username": "user@example.com", "password": "hunter2"}
+
+# What a Zephyr hood puts on the wire when it takes a lease.
+HOOD_HOSTNAME = "Zephyr_Hood"
+HOOD_MAC = "f8:f0:05:aa:bb:cc"
+
+# What reaches a config flow is not that, quite: the dhcp integration
+# lowercases the hostname and hands the MAC over as bare hex
+# (homeassistant/components/dhcp/__init__.py), so building the fixture by
+# normalising the values above keeps the two facts in one place and stops
+# the tests from passing on a shape the real thing never sends.
+DISCOVERY = DhcpServiceInfo(
+    ip="192.0.2.42",
+    hostname=HOOD_HOSTNAME.lower(),
+    macaddress=HOOD_MAC.replace(":", ""),
+)
 
 TOKENS_RECORD = {
     "username": "user@example.com",
@@ -269,3 +288,186 @@ async def test_reauth_updates_the_password_and_tokens(
     assert result["reason"] == "reauth_successful"
     assert entry.data["password"] == "new-password"  # noqa: S105
     assert entry.data[CONF_TOKENS] == TOKENS_RECORD
+
+
+async def test_manifest_matcher_catches_the_real_hood(hass: HomeAssistant) -> None:
+    """The declared patterns must match what a Zephyr hood announces.
+
+    Nothing else in this suite would notice a typo here: every other DHCP
+    test starts from a flow that dhcp has already decided to route to us,
+    so a matcher that matches nothing would leave them all green while
+    discovery never fired on real hardware.
+
+    Both keys are declared because dhcp requires both to match. f8:f0:05 is
+    a module vendor's OUI, so on its own it would raise a card for whatever
+    unrelated hardware happens to share the part; the hostname on its own
+    is a name any device could claim. It is the pair that says Zephyr hood.
+    """
+    integration = await async_get_integration(hass, DOMAIN)
+    (matcher,) = integration.dhcp
+
+    # hassfest enforces these cases and dhcp depends on them: it uppercases
+    # the MAC and lowercases the hostname before comparing, so a matcher
+    # written the other way round silently never matches.
+    assert matcher["macaddress"] == matcher["macaddress"].upper()
+    assert matcher["hostname"] == matcher["hostname"].lower()
+
+    # A matcher carrying a MAC is indexed under the first six characters of
+    # the pattern and the rest is never re-checked, so the OUI has to be
+    # spelled out exactly - the trailing wildcard is convention, not logic.
+    assert matcher["macaddress"][:6] == DISCOVERY.macaddress.upper()[:6]
+
+    # The hostname is the half that is actually fnmatched, and the half
+    # that keeps a smart plug built on the same Wi-Fi module out.
+    assert fnmatch(DISCOVERY.hostname, matcher["hostname"])
+    assert not fnmatch("esp-0a1b2c", matcher["hostname"])
+
+
+async def test_dhcp_discovery_asks_for_the_account(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """A lease cannot say which account owns the hood, so the flow still
+    has to ask - it just gets to ask unprompted."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+
+async def test_dhcp_discovery_creates_an_account_keyed_entry(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """The MAC identifies the flow; the entry is still keyed on the Cognito
+    identity, so a hood discovered here and an account added by hand land on
+    exactly the same entry rather than two that cannot be reconciled."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], USER_INPUT
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {**USER_INPUT, CONF_TOKENS: TOKENS_RECORD}
+
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.unique_id == "us-west-2:00000000-1111-2222-3333-444455556666"
+
+
+async def test_a_discovered_hood_can_be_dismissed(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """Home Assistant only offers "Ignore" on a flow carrying a unique ID,
+    and the frontend reads it straight off the flow context - so a hood
+    whose owner does not want this integration would otherwise get a card
+    that cannot be dismissed and returns on every lease renewal."""
+    await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+    flow = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]
+    assert flow["context"]["unique_id"] == HOOD_MAC
+
+    # The path the Ignore button takes.
+    await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_IGNORE},
+        data={"unique_id": flow["context"]["unique_id"], "title": "Zephyr hood"},
+    )
+    await hass.async_block_till_done()
+
+    # And it has to stay dismissed across the next lease.
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_dismissing_one_hood_does_not_silence_another(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """Ignoring a discovery writes a config entry, and an already-configured
+    entry is exactly what suppresses the next card - so a household with two
+    hoods could dismiss the card for the one in the kitchen and never be
+    offered the other."""
+    MockConfigEntry(
+        domain=DOMAIN,
+        source=config_entries.SOURCE_IGNORE,
+        unique_id="f8:f0:05:11:22:33",
+        data={},
+    ).add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+
+async def test_a_renewed_lease_does_not_stack_a_second_card(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """Hoods renew their lease for as long as they are powered. Without a
+    unique ID on the flow every renewal would add another identical card
+    beside the one already on screen."""
+    first = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+    assert first["type"] is FlowResultType.FORM
+
+    second = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+
+    assert second["type"] is FlowResultType.ABORT
+    assert second["reason"] == "already_in_progress"
+    assert len(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) == 1
+
+
+async def test_dhcp_discovery_is_silent_once_an_account_is_configured(
+    hass: HomeAssistant, mock_client
+) -> None:
+    """One entry covers every hood on its account, and the hood keeps
+    renewing its lease forever - so without this the reward for setting the
+    integration up would be a card offering to set it up again, for good."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="user@example.com",
+        data={**USER_INPUT, CONF_TOKENS: TOKENS_RECORD},
+        source=config_entries.SOURCE_USER,
+        unique_id="us-west-2:00000000-1111-2222-3333-444455556666",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_the_lease_leaves_no_trace(
+    hass: HomeAssistant, mock_client, caplog
+) -> None:
+    """A MAC is personal data - the library's own rule is never to log one
+    above DEBUG - and the IP is meaningless here because the integration
+    never connects to it. Neither may be logged or reach the entry."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.zephyr_connect")
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_DHCP}, data=DISCOVERY
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], USER_INPUT
+    )
+    await hass.async_block_till_done()
+
+    stored = repr(hass.config_entries.async_entries(DOMAIN)[0].data)
+    for secret in (DISCOVERY.macaddress, HOOD_MAC, DISCOVERY.ip):
+        assert secret not in stored
+        assert secret not in caplog.text
