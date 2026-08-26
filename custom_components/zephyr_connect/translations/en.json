@@ -19,6 +19,7 @@
     },
     "abort": {
       "already_configured": "This account is already set up.",
+      "already_in_progress": "This hood is already being set up.",
       "reauth_successful": "Re-authentication was successful."
     }
   },
