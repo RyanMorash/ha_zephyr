@@ -19,7 +19,7 @@ parse it. There is no requirements/lock file in the repo; install the two depend
 directly:
 
 ```bash
-pip install pytest-homeassistant-custom-component 'pyzephyrconnect==0.2.0'   # version per manifest.json
+pip install pytest-homeassistant-custom-component 'pyzephyrconnect==0.2.1'   # version per manifest.json
 
 pytest                                        # whole suite (asyncio_mode=auto via pytest.ini)
 pytest tests/test_fan.py                      # one file
@@ -53,7 +53,9 @@ config entry
 coordinators so unload can stop it even for an account with zero hoods.
 
 **Updates are push-primary.** The library invokes `ZephyrCoordinator._handle_push` whenever
-the device reports. The `DataUpdateCoordinator` interval is a *fallback* with three jobs
+the device reports. That callback does not apply the state inline: pyzephyrconnect 0.2.1
+notifies listeners while a write still holds the hood lock, so the coordinator schedules
+the update and returns. The `DataUpdateCoordinator` interval is a *fallback* with three jobs
 (see `_async_update_data`): re-read over HTTPS while MQTT is down (`DEGRADED_POLL_INTERVAL_SECONDS`),
 a periodic safety-net re-read while connected (`SAFETY_NET_INTERVAL_SECONDS`), and — most
 importantly — it is the only path by which a terminal credential/policy failure inside the
@@ -107,8 +109,14 @@ carries the full validated protocol section and **supersedes any older document,
 the library's PROTOCOL.md**, where they disagree.
 
 - **Writes go to `state.reported`, not `state.desired`.** AWS accepts `desired` and the
-  device silently ignores it. The device echoes its real state ~1.2–1.6 s later via push,
-  so no optimistic local update is needed.
+  device silently ignores it. pyzephyrconnect 0.2.1 applies a successful non-destructive
+  write to the visible cache and notifies listeners before the device echo, while still
+  holding the hood lock. The integration does not apply its own optimistic state.
+  Destructive fields are not applied locally. Device-derived keys (`power` rising after
+  a fan write) still arrive with the echo ~1.2–1.6 s later. A poll must publish
+  `hood.state`, not `async_poll`'s return value: the return is reported state with
+  pending commands stripped off, and publishing it would snap entities back until the
+  echo.
 - **Every validated `set*` field actuates the hood rather than recording a preference.**
   Enabling clean air or setting a delay timer *starts the fan at speed 1*. Assume any
   untested `set*` field actuates until proven otherwise, and never infer device behaviour

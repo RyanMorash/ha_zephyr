@@ -67,9 +67,12 @@ class ZephyrEntity(CoordinatorEntity[ZephyrCoordinator]):
         """Await a hood control call, mapping library errors to HA's.
 
         ACTUATES HARDWARE. The library publishes to state.reported - the
-        device ignores state.desired entirely - and the device echoes its
-        real state ~1.2-1.6s later via push, so no optimistic local update
-        is needed.
+        device ignores state.desired entirely. pyzephyrconnect 0.2.1
+        applies a successful non-destructive write to its visible cache
+        and notifies the coordinator before the device echo, so this
+        method must not also write entity state. Destructive fields are
+        not applied locally, and device-derived keys such as power are
+        left for the echo, which still arrives ~1.2-1.6s later.
 
         ZephyrNotConnectedError (a write attempted while this hood's shadow
         connection is down) subclasses ZephyrError and lands here too: the

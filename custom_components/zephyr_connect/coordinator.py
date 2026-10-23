@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import timedelta
@@ -53,6 +54,10 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
         self.capabilities = hood.capabilities
         self.thing_name = hood.thing_name
         self._unsubscribe: Callable[[], None] | None = None
+        # A push scheduled for the next loop turn, and whether shutdown has
+        # started. See _handle_push for why the update is not applied inline.
+        self._push_handle: asyncio.Handle | None = None
+        self._accept_push = True
         # Counts consecutive connected ticks since the last real poll (either
         # a safety-net poll below, or a degraded poll while disconnected).
         # Reaching SAFETY_NET_TICKS triggers a safety-net poll and resets it.
@@ -97,11 +102,44 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
 
     @callback
     def _handle_push(self, state: HoodState) -> None:
-        """Device reported. Runs on the event loop; the library guarantees
-        it never dispatches from paho's network thread."""
+        """Library reported a new visible state. Runs on the event loop.
+
+        The library never dispatches from paho's network thread. It does
+        call listeners inline, and pyzephyrconnect 0.2.1 does so from a
+        write that still holds the hood lock: a successful non-destructive
+        publish is applied to the visible cache before this returns.
+        Applying that state here would update entities on the same task,
+        and a state-changed automation could call back into the hood and
+        deadlock on the lock. call_soon runs only after this callback
+        returns and the lock is released.
+
+        The callback is handed the whole visible cache, not a delta, so a
+        newer report that arrives before the scheduled one runs replaces
+        it rather than queueing behind it.
+        """
+        if not self._accept_push:
+            return
+        if self._push_handle is not None:
+            self._push_handle.cancel()
+        self._push_handle = asyncio.get_running_loop().call_soon(
+            self._apply_push, state
+        )
+
+    @callback
+    def _apply_push(self, state: HoodState) -> None:
+        """Apply a push scheduled by _handle_push."""
+        self._push_handle = None
+        if not self._accept_push:
+            return
         self.async_set_updated_data(state)
 
     async def async_shutdown(self) -> None:
+        # Before the first await, so a push already queued cannot land on
+        # a coordinator Home Assistant is tearing down.
+        self._accept_push = False
+        if self._push_handle is not None:
+            self._push_handle.cancel()
+            self._push_handle = None
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
@@ -125,11 +163,20 @@ class ZephyrCoordinator(DataUpdateCoordinator[HoodState]):
         which lands in the UpdateFailed clause below.
         """
         try:
-            return await self.hood.async_poll()
+            await self.hood.async_poll()
         except (ZephyrAuthError, ZephyrPolicyError) as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except ZephyrError as err:
             raise UpdateFailed(str(err)) from err
+        # async_poll's return value is authoritative reported state with
+        # pending commands stripped off. pyzephyrconnect 0.2.1 keeps those
+        # commands on hood.state, and has already asked listeners to
+        # publish that visible cache. Returning the raw value would write
+        # it over the top and snap entities back to the pre-command
+        # reading until the echo. A successful poll leaves the cache set.
+        if (visible := self.hood.state) is None:
+            raise UpdateFailed("no state received yet")
+        return visible
 
     async def _async_update_data(self) -> HoodState:
         """Fallback tick: re-read over HTTPS if push is down or stale.
