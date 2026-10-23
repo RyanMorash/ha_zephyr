@@ -146,6 +146,52 @@ async def test_setup_registers_a_push_listener(hass, entry, mock_client) -> None
     _the_hood(mock_client).add_listener.assert_called_once()
 
 
+async def test_push_is_applied_after_the_listener_returns(
+    hass, entry, mock_client
+) -> None:
+    """pyzephyrconnect 0.2.1 notifies listeners inline while a write still
+    holds the hood lock. Applying the state inside that callback would let
+    a state-changed automation call back into the hood and deadlock, so the
+    coordinator schedules the update and returns first. A newer report that
+    arrives before the scheduled one runs replaces it: the callback is the
+    whole visible cache, not a delta."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+    listener = hood.add_listener.call_args.args[0]
+    coordinator = entry.runtime_data.coordinators[0]
+    first = _state(fan=2)
+    second = _state(fan=4)
+
+    listener(first)
+    listener(second)
+
+    assert coordinator.data is not first
+    assert coordinator.data is not second
+    await hass.async_block_till_done()
+    assert coordinator.data is second
+
+
+async def test_shutdown_drops_a_push_that_has_not_been_applied(
+    hass, entry, mock_client
+) -> None:
+    """A push queued for the next loop turn must not land after the
+    coordinator has shut down."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+    listener = hood.add_listener.call_args.args[0]
+    coordinator = entry.runtime_data.coordinators[0]
+    before = coordinator.data
+
+    listener(_state(fan=5))
+    assert coordinator.data is before
+    await coordinator.async_shutdown()
+    await hass.async_block_till_done()
+
+    assert coordinator.data is before
+
+
 async def test_setup_without_saved_tokens_passes_none(
     hass, entry, mock_client
 ) -> None:
@@ -544,6 +590,31 @@ async def test_partial_setup_failure_leaves_no_orphan_timers(
 
     first.async_poll.assert_not_awaited()
     second.async_poll.assert_not_awaited()
+
+
+async def test_poll_publishes_the_visible_cache_not_the_raw_return(
+    hass, entry, mock_client
+) -> None:
+    """async_poll returns reported state with pending commands stripped
+    off. pyzephyrconnect 0.2.1 keeps those commands on hood.state.
+    Publishing the raw return would snap entities back to the pre-command
+    reading until the echo."""
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hood = _the_hood(mock_client)
+    visible = _state(fan=4)
+    hood.state = visible
+    hood.async_poll = AsyncMock(return_value=_state(fan=0))
+    hood.connected = False
+
+    async_fire_time_changed(
+        hass,
+        dt_util.utcnow() + timedelta(seconds=DEGRADED_POLL_INTERVAL_SECONDS + 1),
+    )
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data.coordinators[0]
+    assert coordinator.data is visible
 
 
 async def test_degraded_tick_polls_every_time(hass, entry, mock_client) -> None:
