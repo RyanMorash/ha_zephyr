@@ -34,8 +34,9 @@ existing files. Match surrounding style by hand instead.
 
 CI (`.github/workflows/validate.yml`) runs only **hassfest** and **HACS validation** — the
 test suite is not run there, so run it locally before pushing. hassfest checks
-`manifest.json`, `strings.json`, and `translations/en.json`; the latter two are currently
-byte-identical and must be kept in sync when adding entities.
+`manifest.json` and `translations/en.json`. Custom integrations ship the finished
+English strings in `translations/en.json` and do not use `strings.json`. Nothing
+replaces `[%key:…%]` references in that file, so write every string out in full.
 
 ## Architecture
 
