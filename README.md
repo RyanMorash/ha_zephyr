@@ -13,7 +13,10 @@ AWS IoT device shadows. The protocol was reverse-engineered; see
 
 ## Install
 
-Add this repository as a HACS custom repository, install **Zephyr Connect**,
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RyanMorash&repository=ha_zephyr&category=integration)
+
+The button opens this repository in the Marketplace on Home Assistant 2026.11
+and later, and in HACS on earlier versions. Install **Zephyr Connect**,
 restart Home Assistant, then add the integration and sign in with the account
 you use in the Zephyr Connect app.
 
