@@ -1,9 +1,9 @@
 {
   "domain": "zephyr_connect",
   "name": "Zephyr Connect",
+  "categories": ["appliances_cleaning.cooking"],
   "codeowners": ["@RyanMorash"],
   "config_flow": true,
-  "categories": ["appliances_cleaning.cooking"],
   "dhcp": [
     {
       "hostname": "zephyr_hood*",
