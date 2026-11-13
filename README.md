@@ -16,16 +16,24 @@ AWS IoT device shadows. The protocol was reverse-engineered; see
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RyanMorash&repository=ha_zephyr&category=integration)
 
 The button opens this repository in the Marketplace on Home Assistant 2026.11
-and later, and in HACS on earlier versions. Install **Zephyr Connect**,
-restart Home Assistant, then add the integration and sign in with the account
-you use in the Zephyr Connect app.
+and later, and in HACS on earlier versions. Install **Zephyr Connect**.
+
+On Home Assistant 2026.11 and later the integration loads as soon as it is
+installed. Add it from the button below and sign in with the account you use
+in the Zephyr Connect app. On earlier versions, restart Home Assistant after
+installing, then add it the same way.
+
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=zephyr_connect)
+
+An update or a removal needs a restart. On 2026.11 and later the Marketplace
+opens a repair for that, with a button to restart.
 
 You may not have to go looking for it. Home Assistant recognises a Zephyr hood
-by the DHCP lease it takes, so after the restart a card usually appears under
-**Settings → Devices & services** on its own — within the hour, or sooner if
-the hood renews its lease before that. The card is a shortcut to the same
-sign-in, not a local connection: the hood exposes no local API, so its address
-on your network is noted and never used.
+by the DHCP lease it takes, so once the integration is loaded a card usually
+appears under **Settings → Devices & services** on its own — within the hour,
+or sooner if the hood renews its lease before that. The card is a shortcut to
+the same sign-in, not a local connection: the hood exposes no local API, so
+its address on your network is noted and never used.
 
 The integration installs its
 [pyzephyrconnect](https://pypi.org/project/pyzephyrconnect/) library from

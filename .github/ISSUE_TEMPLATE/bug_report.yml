@@ -23,7 +23,7 @@ body:
     attributes:
       label: Zephyr Connect version
       description: On the integration page, or the version in manifest.json.
-      placeholder: "0.1.2"
+      placeholder: "0.1.3"
     validations:
       required: true
   - type: input
