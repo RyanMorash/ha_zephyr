@@ -47,10 +47,11 @@ MQTT_CLIENT_ID_SUFFIX = "-ha"
 
 # Upper bound offered for the delay-off number, in seconds.
 #
-# The units are established: `setdelaytimer` is seconds, and the device
-# accepts values off the vendor app's two presets (the library's
-# PROTOCOL.md section 5). 3600 is the largest value proven accepted, not a
-# known device limit - the real ceiling is still unprobed (PROTOCOL.md
-# section 7), so this cap is where the evidence stops rather than where the
-# hardware does.
+# The units are established: `setdelaytimer` is seconds. Android 1.1.16
+# writes only 0, 300, or 600, and its display would show 3600 as 10
+# minutes; that is the app, not the device. Off-preset values are accepted
+# (the library's PROTOCOL.md section 5). 3600 is the largest value proven
+# accepted, not a known device limit - the ceiling above that is still
+# unprobed (PROTOCOL.md section 7), so this cap is where the evidence stops
+# rather than where the hardware does.
 DELAY_TIMER_MAX = 3600

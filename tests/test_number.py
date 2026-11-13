@@ -46,8 +46,9 @@ def _coordinator(set_delay=0):
 @pytest.mark.parametrize("raw", [0, 60, 90, 300, 600])
 def test_raw_device_value_is_displayed_unconverted(raw):
     """Seconds in, seconds out. 90 is the case a minutes display would
-    round: the device holds off-preset values, so the entity must show the
-    one it is actually holding."""
+    round, and it is off the Android app's 0/300/600 presets: the device
+    holds those values, so the entity must show the one it is actually
+    holding."""
     assert ZephyrDelayNumber(_coordinator(set_delay=raw)).native_value == raw
 
 

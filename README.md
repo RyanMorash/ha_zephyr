@@ -39,7 +39,8 @@ re-authenticating.
 | Power switch | Off stops everything; on restores the previous levels |
 | Clean air switch | **Starts the fan at speed 1** when enabled |
 | Delay off | Seconds. **Setting a value starts the fan at speed 1** |
-| Reset grease filter | Zeroes the usage counter — see below |
+| Reset grease filter | Zeroes the grease usage counter — see below |
+| Reset charcoal filter | Zeroes the charcoal usage counter. Only if the hood advertises one |
 | Grease / charcoal filter | Percentage of life remaining |
 | Fan / light runtime | Diagnostic, disabled by default |
 | Delay remaining | Counts down, updates once a minute |
@@ -47,7 +48,7 @@ re-authenticating.
 | Fan, filter and fault problem sensors | |
 
 Entities are created from the capabilities your hood reports, so a model
-without a charcoal filter simply will not get that sensor.
+without a charcoal filter simply will not get that sensor or its reset.
 
 ## Things worth knowing
 
@@ -66,30 +67,31 @@ of showing a bare number. It is not converted to minutes: seconds is the
 device's own unit, and rounding to minutes would misreport a timer set to
 something in between from the vendor app.
 
-The vendor app offers only two presets, but the device accepts arbitrary
-values, so this integration exposes a free-entry number. Its 3600-second cap
-is the largest value proven accepted, not a known device limit — nobody has
-established where the hood's own ceiling is.
+The Android app writes only off, 5 minutes, or 10 minutes (0, 300, or 600
+seconds) and would display a one-hour timer as 10 minutes. That is the app.
+The device accepts arbitrary values, so this integration exposes a free-entry
+number. Its 3600-second cap is the largest value proven accepted, not a known
+device limit — nobody has established where the hood's own ceiling is.
 
-**Reset grease filter is destructive and untested.** It zeroes a counter that
-cannot be reconstructed, and the write has never been validated against
-hardware — doing so requires actually cleaning a filter. Press it only when
-you have genuinely cleaned yours.
+**Both filter resets are destructive, and neither has been watched on
+hardware.** Each publishes `1` and is meant to zero a usage counter that
+cannot be put back. The charcoal reset is its own field
+(`resetcharcoalfilter`), confirmed from Android 1.1.16, not a reuse of the
+grease command. Press either only when you have genuinely cleaned or replaced
+that filter. A hood that does not advertise a charcoal filter does not get
+the charcoal reset.
 
 **Ducted vs recirculating is read-only.** Changing it would start charcoal
-filter accounting for a filter that may not be installed. Use the vendor app
-if you genuinely need to change it.
-
-**There is no charcoal filter reset.** The hood's shadow exposes a grease
-filter reset and nothing equivalent for charcoal, so a recirculating hood gets
-a charcoal-life reading with no way to zero it from here. Whether the vendor
-app has one — and whether it quietly reuses the grease reset — is unknown.
+filter accounting for a filter that may not be installed. The vendor app
+also registers the change with the cloud, which this integration does not
+do. Use the vendor app if you genuinely need to change it.
 
 **Light is brightness-only, even on hoods that support tunable white.** The
 hood used to build this integration doesn't support TruHue (Zephyr's
-color-temperature feature), so color-temperature control has never been
-validated and isn't implemented. Hoods that do support it will only get
-brightness control until someone with that hardware can verify it.
+color-temperature feature), and Android 1.1.16 has no color control either,
+so color-temperature control has never been validated and isn't implemented.
+Hoods that do support it will only get brightness control until someone with
+that hardware can verify it.
 
 ## Reporting problems
 

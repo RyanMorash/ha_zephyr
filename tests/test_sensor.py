@@ -157,7 +157,8 @@ def test_unreported_act_is_unknown():
 )
 def test_recirculating_is_read_only_text(value, expected):
     """Read-only by design: writing it would start charcoal accounting for
-    a filter that may not be physically installed."""
+    a filter that may not be physically installed, and the vendor app also
+    registers the change in the cloud, which the library does not."""
     assert _sensor("recirculating", set_recirculating=value).native_value == expected
 
 

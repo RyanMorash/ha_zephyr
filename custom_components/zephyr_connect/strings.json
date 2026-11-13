@@ -35,7 +35,8 @@
       "delay_off": { "name": "Delay off" }
     },
     "button": {
-      "reset_grease_filter": { "name": "Reset grease filter" }
+      "reset_grease_filter": { "name": "Reset grease filter" },
+      "reset_charcoal_filter": { "name": "Reset charcoal filter" }
     },
     "sensor": {
       "grease_filter": { "name": "Grease filter" },

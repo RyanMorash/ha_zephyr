@@ -39,8 +39,9 @@ class ZephyrLight(ZephyrEntity, LightEntity):
 
     _attr_translation_key = "hood_light"
     # HoodCapabilities.supports_tru_hue (Zephyr's tunable-white feature) is
-    # deliberately unconsumed here: the reference hood reports
-    # truHueSupport: 0, so a color-temperature implementation would ship
+    # deliberately unconsumed here. The reference hood reports
+    # truHueSupport: 0, and Android 1.1.16 has no color, Kelvin, RGB, or
+    # truHue control, so a color-temperature implementation would ship
     # unvalidated. A hood reporting supports_tru_hue = 1 gets
     # brightness-only control until someone with that hardware can verify
     # a COLOR_TEMP implementation against it.

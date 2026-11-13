@@ -63,6 +63,13 @@ BINARY_SENSORS: tuple[ZephyrBinarySensorDescription, ...] = (
         # `cleangreasefilters` means due, `alarmgreasefilter` means overdue.
         # One entity with severity as an attribute beats two that would
         # both fire for the same filter.
+        #
+        # Android 1.1.16 also warns when 15% of filter life remains
+        # (FILTER_USAGE_REPLACE_WARNING). That is a UI threshold on the
+        # percentage the filter sensor already shows, not a device flag,
+        # so it does not become a second problem entity. The charcoal
+        # sensor below is the same: the hood's own clean flag, not the
+        # app's 15% line.
         attributes_fn=lambda state: {"overdue": _flag(state.alarm_grease_filter)},
     ),
     ZephyrBinarySensorDescription(
@@ -78,11 +85,13 @@ BINARY_SENSORS: tuple[ZephyrBinarySensorDescription, ...] = (
         key="fan_fault",
         translation_key="fan_fault",
         device_class=BinarySensorDeviceClass.PROBLEM,
-        # alarmfan and fanwarning may differ in severity - still
-        # unconfirmed, and still listed as open in the library's
-        # PROTOCOL.md section 7: neither has ever fired on the reference
-        # device. Either means the fan needs attention, so they combine
-        # into one entity with both flags kept as attributes.
+        # alarmfan and fanwarning may differ in severity. Neither has fired
+        # on the reference device, and Android 1.1.16 stores both integers
+        # without reading them (the library's PROTOCOL.md section 7).
+        # "fanwarning" as a push category only means "open the fan screen";
+        # it does not define the shadow integer. Either flag means the fan
+        # needs attention, so they combine into one entity with both kept
+        # as attributes.
         is_on_fn=lambda state: _any_flag(state.alarm_fan, state.fan_warning),
         attributes_fn=lambda state: {
             "alarm": _flag(state.alarm_fan),
