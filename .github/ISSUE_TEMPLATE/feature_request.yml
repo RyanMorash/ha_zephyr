@@ -1,0 +1,21 @@
+name: Feature request
+description: Something the integration should do that it does not
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Hood model
+      description: Include this when the request depends on hardware you have.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should change?
+    validations:
+      required: true

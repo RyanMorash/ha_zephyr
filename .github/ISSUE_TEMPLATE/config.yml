@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Protocol or library defect
+    url: https://github.com/RyanMorash/pyzephyrconnect/issues
+    about: >-
+      Authentication, the MQTT connection, and shadow fields belong in
+      pyzephyrconnect.
+  - name: Install and usage notes
+    url: https://github.com/RyanMorash/ha_zephyr#readme
+    about: >-
+      Setup, which controls actuate the hood, and what has been validated
+      on hardware.

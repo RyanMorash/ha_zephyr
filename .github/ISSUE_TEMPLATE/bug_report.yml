@@ -1,0 +1,57 @@
+name: Bug report
+description: An entity, config flow, or setup defect in Zephyr Connect
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Download diagnostics from the device page and attach them below.
+        They are redacted — no serial, MAC, thing name, coordinates,
+        credentials, or session tokens.
+
+        A problem in the cloud protocol itself belongs in
+        [pyzephyrconnect](https://github.com/RyanMorash/pyzephyrconnect/issues).
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.11.0"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Zephyr Connect version
+      description: On the integration page, or the version in manifest.json.
+      placeholder: "0.1.2"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Hood model
+      description: From the device page, or the model field in diagnostics.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Drag the file from the device page here. Leave this empty only
+        when setup never created a device.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Optional. Debug logging is custom_components.zephyr_connect and
+        pyzephyrconnect. Redact thingName, SN, MAC, location, and tokens
+        before pasting — diagnostics are already safe, logs are not.
+      render: text
