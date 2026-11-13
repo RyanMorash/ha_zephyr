@@ -140,11 +140,13 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         # meaningful one, since ACT being enabled explains why the hood's
         # airflow is limited. Enabled by default for that reason.
         #
-        # Stays a free-form string, deliberately. "Disabled" is still the
-        # only value ever observed (the library's PROTOCOL.md section 7
-        # lists this as open), and an enum or a translated device class
-        # built on one sample would mistranslate every other value the
-        # moment one appears.
+        # Stays a free-form string, deliberately. Android 1.1.16 names this
+        # Airflow Control Technology, displays the raw shadow string, and
+        # never writes it. "Disabled" is the factory default and still the
+        # only value observed; other values are unenumerated (the library's
+        # PROTOCOL.md section 7). An enum or a translated device class built
+        # on that one sample would mistranslate every other value the moment
+        # one appears.
         # `or None` folds both None (unreported) and "" into unknown.
         value_fn=lambda state, _caps: state.act or None,
     ),
@@ -152,10 +154,13 @@ SENSORS: tuple[ZephyrSensorDescription, ...] = (
         key="recirculating",
         translation_key="recirculating",
         entity_category=EntityCategory.DIAGNOSTIC,
-        # Read-only by design: writing it would begin charcoal-filter
-        # accounting for a filter that may not be installed. None means the
-        # device did not report the field - unknown, NOT "ducted": ducted
-        # is a positive claim about how the hood is installed.
+        # Read-only by design. Writing `setrecirculating` would begin
+        # charcoal-filter accounting for a filter that may not be installed.
+        # The vendor Android app also POSTs `/updaterecirculating` to
+        # register the change in the cloud; the library performs the shadow
+        # write only, so a switch here would not do what the app does. None
+        # means the device did not report the field - unknown, NOT "ducted":
+        # ducted is a positive claim about how the hood is installed.
         value_fn=lambda state, _caps: (
             None
             if state.set_recirculating is None

@@ -19,7 +19,7 @@ parse it. There is no requirements/lock file in the repo; install the two depend
 directly:
 
 ```bash
-pip install pytest-homeassistant-custom-component 'pyzephyrconnect==0.2.1'   # version per manifest.json
+pip install pytest-homeassistant-custom-component 'pyzephyrconnect==0.3.0'   # version per manifest.json
 
 pytest                                        # whole suite (asyncio_mode=auto via pytest.ini)
 pytest tests/test_fan.py                      # one file
@@ -104,9 +104,12 @@ also registered via `entry.async_on_unload`.
 
 ## Device behaviour worth knowing before changing anything
 
-Established against real hardware (an AK7400AS, 2026-08-24). `docs/superpowers/plans/2026-08-24-zephyr-connect-ha-integration.md`
-carries the full validated protocol section and **supersedes any older document, including
-the library's PROTOCOL.md**, where they disagree.
+Established against real hardware (an AK7400AS, 2026-08-24). pyzephyrconnect's
+PROTOCOL.md is the protocol reference; 0.3.0 folded in a static analysis of
+Android 1.1.16 (`docs/android-findings.md` in that repo). The attended-validation
+writeup in `docs/superpowers/plans/2026-08-24-zephyr-connect-ha-integration.md`
+records what was measured on that date. Where it still says there is no
+`resetcharcoalfilter`, the library has superseded it.
 
 - **Writes go to `state.reported`, not `state.desired`.** AWS accepts `desired` and the
   device silently ignores it. pyzephyrconnect 0.2.1 applies a successful non-destructive
@@ -130,12 +133,18 @@ the library's PROTOCOL.md**, where they disagree.
 - **`DELAY_TIMER_MAX = 3600` is where the evidence stops, not a known device limit.** Several
   values in this codebase are like that; the comments say which are measured, which are
   inferred, and which are unprobed. Preserve that distinction rather than flattening it.
-- **The grease filter reset is destructive and has never been validated** against hardware —
-  verifying it requires actually cleaning a filter. There is no charcoal equivalent in the
-  shadow; do not invent one by writing the grease field.
-- **`setrecirculating` is deliberately read-only**, and tunable white (TruHue) is
-  deliberately unimplemented — the reference hood reports `truHueSupport: 0`, so a
-  colour-temperature implementation would ship unvalidated.
+- **Both filter resets are destructive, and their live effect has never been watched**
+  on hardware. `resetgreasefilter` and `resetcharcoalfilter` each publish `1` to
+  `state.reported` and are intended to zero the matching usage counter, which cannot
+  be reconstructed. Android 1.1.16 has a dedicated button for each. Do not reset one
+  filter by writing the other field. Verifying either requires actually cleaning or
+  replacing that filter.
+- **`setrecirculating` is deliberately read-only.** The vendor Android app writes the
+  shadow and also POSTs `/updaterecirculating`; the library performs the shadow write
+  only, and writing it would start charcoal-filter accounting for a filter that may
+  not be installed. Tunable white (TruHue) is deliberately unimplemented — the
+  reference hood reports `truHueSupport: 0`, and Android 1.1.16 has no color control,
+  so a colour-temperature implementation would ship unvalidated.
 
 ## Comment conventions
 

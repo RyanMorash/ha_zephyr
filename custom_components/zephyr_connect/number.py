@@ -48,10 +48,11 @@ class ZephyrDelayNumber(ZephyrEntity, NumberEntity):
     hood should run. The description must say so, because a number entity
     that starts an appliance is otherwise a surprise.
 
-    The vendor app offers only two presets, but the device accepts
+    Android 1.1.16 writes only 0, 300, or 600 seconds, and its display
+    would show 3600 as 10 minutes. That is the app. The device accepts
     arbitrary values, so this exposes the full range. The upper bound is
     where the evidence stops, not a known device limit: DELAY_TIMER_MAX is
-    the largest value proven accepted, and the real ceiling is still
+    the largest value proven accepted, and the ceiling above it is still
     unprobed.
     """
 
